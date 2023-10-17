@@ -95,6 +95,7 @@ class Bishop(Method):
 if __name__ == "__main__":
     bishop = Bishop()
     bishop.add_data(Data(torch.Tensor([1, 2, 3])))
+    bishop.evaluate(torch.Tensor([1, 2, 3]))
     bishop.estimate()  # run the training
     bishop.predict(torch.Tensor([1, 2, 3]))
 

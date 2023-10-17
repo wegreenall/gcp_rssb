@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import torch
 from enum import Enum
+from abc import ABCMeta, abstractmethod
 
 
 @dataclass
@@ -10,7 +11,9 @@ class Data:
     points: torch.Tensor
 
 
-class Metric(Enum):
-    L2 = 1
-    L1 = 2
-    TEST_LOG_LIKELIHOOD = 3
+class Metric(ABCMeta):
+    @abstractmethod
+    def calculate(
+        self, predicted: torch.Tensor, actual: torch.Tensor
+    ) -> torch.Tensor:
+        pass
