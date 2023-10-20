@@ -56,7 +56,7 @@ class Method(ABCMeta):
 
     @abstractmethod
     def evaluate(
-        self, test_points: torch.Tensor, method: Metric
+        self, test_points: torch.Tensor, metric: Metric
     ) -> torch.Tensor:
         pass
 
