@@ -1,5 +1,5 @@
 import abc
-from abc import ABCMeta, abstractmethod
+from abc import ABC, abstractmethod
 from data import Data, Metric
 from typing import Callable
 
@@ -23,17 +23,21 @@ class WilliamHyperparameters(MethodHyperparameters):
     basis_function: Callable
 
 
-class Method(ABCMeta):
+class Method(ABC):
     """
     Interface representing method in point process estimation.
     """
 
-    @abstractmethod
+    def __init__(self):
+        pass
+
     def add_data(self, data_points: Data):
         self.data_points = data_points
 
     @abstractmethod
-    def get_kernel(self, left_points, right_points) -> torch.Tensor:
+    def get_kernel(
+        self, left_points: torch.Tensor, right_points: torch.Tensor
+    ) -> torch.Tensor:
         pass
 
     @abstractmethod
@@ -98,5 +102,4 @@ if __name__ == "__main__":
     bishop.evaluate(torch.Tensor([1, 2, 3]))
     bishop.estimate()  # run the training
     bishop.predict(torch.Tensor([1, 2, 3]))
-
     pass
