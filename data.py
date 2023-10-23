@@ -2,6 +2,7 @@ import torch
 from enum import Enum
 from abc import ABCMeta, abstractmethod
 from torchmin import minimize_constr
+from dataclasses import dataclass
 
 
 class PoissonProcess:
@@ -43,6 +44,8 @@ class PoissonProcess:
                 rate=self.max_time * self.bound
             ).sample()
         )
+
+        # samples to be thinned
         homo_samples, _ = torch.sort(
             torch.distributions.Uniform(0, self.max_time).sample(
                 torch.Size([num_of_points])
@@ -68,6 +71,13 @@ class PoissonProcess:
 
     def get_bound(self):
         return self.bound
+
+
+@dataclass
+class Data:
+    """A dataclass for storing data."""
+
+    points: torch.Tensor
 
 
 class Metric(ABCMeta):
