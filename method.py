@@ -1,6 +1,6 @@
 import abc
 from abc import ABC, abstractmethod
-from data import Data, Metric
+from gcp_rssb.data import Data, Metric
 from typing import Callable
 
 from dataclasses import dataclass
