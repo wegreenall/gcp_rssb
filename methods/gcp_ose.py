@@ -16,6 +16,7 @@ from gcp_rssb.data import PoissonProcess
 from ortho.basis_functions import Basis, standard_chebyshev_basis
 
 import matplotlib.pyplot as plt
+from termcolor import colored
 
 
 @dataclass
@@ -45,12 +46,17 @@ class OrthogonalSeriesCoxProcess(Method):
         self.ose_coeffics = None
         self.trained = False
 
-    def add_data(self, data_points):
+    def add_data(self, data_points) -> None:
         """
         Adds the data to the model.
 
-        Then, captures the orthogonal series estimate coefficients of the
-        intensity function.
+
+        Specifically, it:
+            - stores the data on this class
+            - calculates the orthogonal series estimate coefficients of the
+              intensity function
+            - calculates the posterior mean of the intensity function
+            - sets up the Mapping, for which the data points are a prerequisite
         """
         self.data_points = data_points
         self.ose_coeffics = self._get_ose_coeffics()
@@ -64,7 +70,7 @@ class OrthogonalSeriesCoxProcess(Method):
     def get_kernel(self, left_points, right_points):
         pass
 
-    def train(self):
+    def train(self) -> None:
         """
         Trains the model by iterating the mapping until convergence.
         """
@@ -98,7 +104,7 @@ class OrthogonalSeriesCoxProcess(Method):
     def evaluate(self, test_points, method):
         pass
 
-    def _get_ose_coeffics(self):
+    def _get_ose_coeffics(self) -> torch.Tensor:
         """
         Calculates the orthogonal series estimate given the data points and
         the basis functions.
@@ -114,7 +120,7 @@ class OrthogonalSeriesCoxProcess(Method):
         coeffics = torch.sum(design_matrix, dim=0)
         return coeffics
 
-    def _get_posterior_mean(self):
+    def _get_posterior_mean(self) -> HilbertSpaceElement:
         """
         Calculates the posterior mean of the intensity function.
 
@@ -128,6 +134,71 @@ class OrthogonalSeriesCoxProcess(Method):
         return HilbertSpaceElement(
             self.hyperparameters.basis, self.ose_coeffics
         )
+
+
+class OrthogonalSeriesCoxProcessParameterised(OrthogonalSeriesCoxProcess):
+    def __init__(
+        self,
+        gcp_ose_hyperparameters: GCPOSEHyperparameters,
+        eigenvalue_generator: EigenvalueGenerator,
+    ):
+        super().__init__(gcp_ose_hyperparameters)
+        self.eigenvalue_generator = eigenvalue_generator
+
+    def train(self):
+        """
+        In this version, instead of naively directly getting the eigenvalues,
+        we pass in the eigenvalues from the eigenvalue generator given the
+        parameters; we then solve for the parameters each time.
+
+        This then allows us to maintain the prior structure of the eigenvalues.
+        """
+        if self.data_points is None:
+            raise ValueError(
+                "No data points are set. Please add data to the model first."
+            )
+        if self.trained:
+            raise ValueError(
+                "The model is already trained. Please reset the model first."
+            )
+
+        if not self.trained:
+            # set up the initial guess: 1/λ where λ = 1
+            # initial parameters?
+            previous_parameters = {
+                "ard_parameter": torch.Tensor(
+                    [1.0]
+                ),  # not identifiable from prec.
+                "precision_parameter": torch.Tensor([0.7]),
+                "variance_parameter": torch.Tensor([1.0]),
+            }
+            previous_guess = 1 / self.eigenvalue_generator(previous_parameters)
+
+            # iterate until convergence
+            new_guess = 1 / self.mapping(previous_guess)
+            new_parameters = self.eigenvalue_generator.inverse(
+                new_guess, previous_parameters
+            )
+            counter = 0
+            while torch.norm(new_guess - previous_guess) > 1e-6:
+                counter += 1
+                if counter % 100 == 0:
+                    print("Iteration:", counter)
+                print(colored("New iteration...", "green"))
+                previous_guess = new_guess
+                previous_parameters = new_parameters
+
+                # update step
+                interim_guess = 1 / self.mapping(previous_guess)
+                new_parameters = self.eigenvalue_generator.inverse(
+                    interim_guess, previous_parameters
+                )
+                new_guess = 1 / self.eigenvalue_generator(new_parameters)
+
+            self.eigenvalues = self.eigenvalue_generator(new_parameters)
+            self.trained = True
+        else:
+            raise ValueError("The model is already trained.")
 
 
 class Mapping(object):
@@ -160,9 +231,12 @@ class Mapping(object):
         self.WPhi = self._get_WPhi()  # WΦ
         self.PhiY = self._get_PhiY()  # ΦY
 
-    def __call__(self, inverse_eigenvalues: torch.Tensor):
+    def __call__(self, inverse_eigenvalues: torch.Tensor) -> torch.Tensor:
         """
         Iterates the mapping.
+
+        Specifically, given a vector of inverse eigenvalues, returns a vector of
+        inverse eigenvalues.
 
         Return shape: [order, 1]
         """
@@ -179,7 +253,7 @@ class Mapping(object):
         result /= self.sigma
         return result
 
-    def _get_basis_matrix(self):
+    def _get_basis_matrix(self) -> torch.Tensor:
         """
         Calculates the basis matrix.
 
@@ -187,7 +261,7 @@ class Mapping(object):
         """
         return self.basis(self.data_points)
 
-    def _get_weight_matrix(self):
+    def _get_weight_matrix(self) -> torch.Tensor:
         """
         Calculates the weight matrix.
 
@@ -196,7 +270,7 @@ class Mapping(object):
         basis_matrix_normalising = torch.sum(self.basis_matrix, dim=0)
         return self.basis_matrix / basis_matrix_normalising
 
-    def _get_design_matrix(self):
+    def _get_design_matrix(self) -> torch.Tensor:
         """
         Calculates the design matrix Φ'Φ.
 
@@ -204,16 +278,16 @@ class Mapping(object):
         """
         return torch.einsum("ji,jk->ik", self.basis_matrix, self.basis_matrix)
 
-    def _get_sigma(self):
+    def _get_sigma(self) -> torch.Tensor:
         """
         Calculates the sigma parameter (the variance or "conditioning"
                                         parameter).
 
         Return shape: [1]
         """
-        return torch.tensor(1.0)
+        return torch.tensor(7.0)
 
-    def _get_pseudodata(self):
+    def _get_pseudodata(self) -> torch.Tensor:
         """
         Calculates the pseudodata.
 
@@ -224,7 +298,7 @@ class Mapping(object):
         return pseudodata
 
     # composite elements
-    def _get_Wy(self):
+    def _get_Wy(self) -> torch.Tensor:
         """
         Calculates the composite element WY.
 
@@ -232,7 +306,7 @@ class Mapping(object):
         """
         return torch.matmul(self.weight_matrix.t(), self.pseudodata)
 
-    def _get_WPhi(self):
+    def _get_WPhi(self) -> torch.Tensor:
         """
         Calculates the composite element WΦ.
 
@@ -240,7 +314,7 @@ class Mapping(object):
         """
         return torch.matmul(self.weight_matrix.t(), self.basis_matrix)
 
-    def _get_PhiY(self):
+    def _get_PhiY(self) -> torch.Tensor:
         """
         Calculates the composite element ΦY.
 
@@ -251,6 +325,8 @@ class Mapping(object):
 
 if __name__ == "__main__":
     plot_intensity = False
+    gcp_ose_standard = False
+    gcp_ose_alternative = True
 
     # present an example
     torch.manual_seed(1)
@@ -280,19 +356,41 @@ if __name__ == "__main__":
     order = 10
     parameters: dict = {"lower_bound": 0.0, "upper_bound": max_time + 0.1}
     ortho_basis = Basis(basis_functions, dimension, order, parameters)
-    hyperparameters = GCPOSEHyperparameters(basis=ortho_basis)
-    gcp_ose = OrthogonalSeriesCoxProcess(hyperparameters)
+    if gcp_ose_standard:
+        hyperparameters = GCPOSEHyperparameters(basis=ortho_basis)
+        gcp_ose = OrthogonalSeriesCoxProcess(hyperparameters)
 
-    # add the data
-    # breakpoint()
-    gcp_ose.add_data(sample_data)
-    # breakpoint()
-    posterior_mean = gcp_ose._get_posterior_mean()
-    plt.plot(x, posterior_mean(x))
-    plt.plot(x, intensity(x))
-    plt.show()
+        # add the data
+        # breakpoint()
+        gcp_ose.add_data(sample_data)
+        # breakpoint()
+        posterior_mean = gcp_ose._get_posterior_mean()
+        plt.plot(x, posterior_mean(x))
+        plt.plot(x, intensity(x))
+        plt.show()
 
-    gcp_ose.train()
-    print(gcp_ose.eigenvalues)
-    plt.plot(gcp_ose.eigenvalues)
-    plt.show()
+        gcp_ose.train()
+        print(gcp_ose.eigenvalues)
+        plt.plot(gcp_ose.eigenvalues)
+        plt.show()
+
+    if gcp_ose_alternative:
+        eigenvalue_generator = SmoothExponentialFasshauer(order)
+        hyperparameters = GCPOSEHyperparameters(basis=ortho_basis)
+        gcp_ose = OrthogonalSeriesCoxProcessParameterised(
+            hyperparameters, eigenvalue_generator
+        )
+
+        # add the data
+        # breakpoint()
+        gcp_ose.add_data(sample_data)
+        # breakpoint()
+        posterior_mean = gcp_ose._get_posterior_mean()
+        plt.plot(x, posterior_mean(x))
+        plt.plot(x, intensity(x))
+        plt.show()
+
+        eigenvalues = gcp_ose.train()
+        print(gcp_ose.eigenvalues)
+        plt.plot(gcp_ose.eigenvalues)
+        plt.show()
