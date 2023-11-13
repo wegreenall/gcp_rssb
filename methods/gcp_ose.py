@@ -40,11 +40,13 @@ class OrthogonalSeriesCoxProcess(Method):
     def __init__(
         self,
         gcp_ose_hyperparameters: GCPOSEHyperparameters,
+        sigma: torch.Tensor,
     ):
         self.hyperparameters = gcp_ose_hyperparameters
         self.data_points = None
         self.ose_coeffics = None
         self.trained = False
+        self.sigma = sigma
 
     def add_data(self, data_points) -> None:
         """
@@ -64,7 +66,10 @@ class OrthogonalSeriesCoxProcess(Method):
 
         # set up the mapping
         self.mapping = Mapping(
-            self.hyperparameters.basis, self.data_points, self.posterior_mean
+            self.hyperparameters.basis,
+            self.data_points,
+            self.posterior_mean,
+            self.sigma,
         )
 
     def get_kernel(self, left_points, right_points):
@@ -140,9 +145,10 @@ class OrthogonalSeriesCoxProcessParameterised(OrthogonalSeriesCoxProcess):
     def __init__(
         self,
         gcp_ose_hyperparameters: GCPOSEHyperparameters,
+        sigma: torch.Tensor,
         eigenvalue_generator: EigenvalueGenerator,
     ):
-        super().__init__(gcp_ose_hyperparameters)
+        super().__init__(gcp_ose_hyperparameters, sigma)
         self.eigenvalue_generator = eigenvalue_generator
 
     def train(self):
@@ -194,9 +200,13 @@ class OrthogonalSeriesCoxProcessParameterised(OrthogonalSeriesCoxProcess):
                     interim_guess, previous_parameters
                 )
                 new_guess = 1 / self.eigenvalue_generator(new_parameters)
+                plt.plot(1 / new_guess)
 
             self.eigenvalues = self.eigenvalue_generator(new_parameters)
+            plt.plot(self.eigenvalues, color="red")
+            plt.show()
             self.trained = True
+            self.parameters = new_parameters
         else:
             raise ValueError("The model is already trained.")
 
@@ -213,6 +223,7 @@ class Mapping(object):
         basis: Basis,
         data_points: torch.Tensor,
         posterior_mean: HilbertSpaceElement,
+        sigma: torch.Tensor,
     ):
         # save the parameters
         self.basis = basis
@@ -223,7 +234,8 @@ class Mapping(object):
         self.basis_matrix = self._get_basis_matrix()  # Φ
         self.weight_matrix = self._get_weight_matrix()  # W
         self.design_matrix = self._get_design_matrix()  # Φ'Φ
-        self.sigma = self._get_sigma()  # σ
+        self.sigma = sigma  # σ
+        print("passed_sigma", self.sigma)
         self.pseudodata = self._get_pseudodata()  # Y
 
         # # get composite elements
@@ -251,6 +263,7 @@ class Mapping(object):
         result = term_1 - term_2
 
         result /= self.sigma
+        print("self.sigma", self.sigma)
         return result
 
     def _get_basis_matrix(self) -> torch.Tensor:
@@ -285,7 +298,7 @@ class Mapping(object):
 
         Return shape: [1]
         """
-        return torch.tensor(7.0)
+        return self.sigma
 
     def _get_pseudodata(self) -> torch.Tensor:
         """
@@ -334,7 +347,7 @@ if __name__ == "__main__":
 
     alpha = 8.0
     beta = 1.0
-    intensity = lambda x: 400 * torch.exp(D.Gamma(alpha, beta).log_prob(x))
+    intensity = lambda x: 100 * torch.exp(D.Gamma(alpha, beta).log_prob(x))
     x = torch.linspace(0.1, max_time, 1000)
     if plot_intensity:
         plt.plot(
@@ -353,21 +366,22 @@ if __name__ == "__main__":
     # set up the class
     basis_functions = standard_chebyshev_basis
     dimension = 1
-    order = 10
+    order = 6
     parameters: dict = {"lower_bound": 0.0, "upper_bound": max_time + 0.1}
     ortho_basis = Basis(basis_functions, dimension, order, parameters)
+    sigma = 12.0
     if gcp_ose_standard:
         hyperparameters = GCPOSEHyperparameters(basis=ortho_basis)
-        gcp_ose = OrthogonalSeriesCoxProcess(hyperparameters)
+        gcp_ose = OrthogonalSeriesCoxProcess(hyperparameters, sigma)
 
         # add the data
         # breakpoint()
         gcp_ose.add_data(sample_data)
         # breakpoint()
         posterior_mean = gcp_ose._get_posterior_mean()
-        plt.plot(x, posterior_mean(x))
-        plt.plot(x, intensity(x))
-        plt.show()
+        # plt.plot(x, posterior_mean(x))
+        # plt.plot(x, intensity(x))
+        # plt.show()
 
         gcp_ose.train()
         print(gcp_ose.eigenvalues)
@@ -378,7 +392,7 @@ if __name__ == "__main__":
         eigenvalue_generator = SmoothExponentialFasshauer(order)
         hyperparameters = GCPOSEHyperparameters(basis=ortho_basis)
         gcp_ose = OrthogonalSeriesCoxProcessParameterised(
-            hyperparameters, eigenvalue_generator
+            hyperparameters, sigma, eigenvalue_generator
         )
 
         # add the data
@@ -391,6 +405,11 @@ if __name__ == "__main__":
         plt.show()
 
         eigenvalues = gcp_ose.train()
+        print("############")
+        print("Eigenvalues:")
         print(gcp_ose.eigenvalues)
+        print("############")
+        print("Parameters:")
+        print(gcp_ose.parameters)
         plt.plot(gcp_ose.eigenvalues)
         plt.show()
