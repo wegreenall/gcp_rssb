@@ -13,9 +13,15 @@ from dataclasses import dataclass
 from typing import Callable
 
 from gcp_rssb.data import PoissonProcess
-from ortho.basis_functions import Basis, standard_chebyshev_basis
+from ortho.basis_functions import (
+    Basis,
+    standard_chebyshev_basis,
+    smooth_exponential_basis,
+    smooth_exponential_basis_fasshauer,
+)
 
 import matplotlib.pyplot as plt
+import tikzplotlib
 from termcolor import colored
 
 
@@ -162,6 +168,7 @@ class OrthogonalSeriesCoxProcessParameterised(OrthogonalSeriesCoxProcess):
     ):
         super().__init__(gcp_ose_hyperparameters, sigma)
         self.eigenvalue_generator = eigenvalue_generator
+        self.dimension = self.hyperparameters.basis.dimension
 
     def train(self):
         """
@@ -183,13 +190,15 @@ class OrthogonalSeriesCoxProcessParameterised(OrthogonalSeriesCoxProcess):
         if not self.trained:
             # set up the initial guess: 1/λ where λ = 1
             # initial parameters?
-            previous_parameters = {
-                "ard_parameter": torch.Tensor(
-                    [1.0]
-                ),  # not identifiable from prec.
-                "precision_parameter": torch.Tensor([0.7]),
-                "variance_parameter": torch.Tensor([1.0]),
-            }
+            previous_parameters = [
+                {
+                    "ard_parameter": torch.Tensor(
+                        [1.0]
+                    ),  # not identifiable from prec.
+                    "precision_parameter": torch.Tensor([0.7]),
+                    "variance_parameter": torch.Tensor([1.0]),
+                }
+            ] * self.dimension
             previous_guess = 1 / self.eigenvalue_generator(previous_parameters)
 
             # iterate until convergence
@@ -198,6 +207,8 @@ class OrthogonalSeriesCoxProcessParameterised(OrthogonalSeriesCoxProcess):
                 new_guess, previous_parameters
             )
             counter = 0
+
+            # begin the loop
             while torch.norm(new_guess - previous_guess) > 1e-6:
                 counter += 1
                 if counter % 100 == 0:
@@ -251,16 +262,16 @@ class Mapping(object):
         self.pseudodata = self._get_pseudodata()  # Y
 
         # # get composite elements
-        self.Wy = self._get_Wy()  # WY
-        self.WPhi = self._get_WPhi()  # WΦ
-        self.PhiY = self._get_PhiY()  # ΦY
+        self.Wy = self._get_Wy()  # W'Y
+        self.WPhi = self._get_WPhi()  # W'Φ
+        self.PhiY = self._get_PhiY()  # Φ'Y
 
     def __call__(self, inverse_eigenvalues: torch.Tensor) -> torch.Tensor:
         """
         Iterates the mapping.
 
-        Specifically, given a vector of inverse eigenvalues, returns a vector of
-        inverse eigenvalues.
+        Specifically, given a vector of inverse eigenvalues, returns a vector
+        of inverse eigenvalues.
 
         Return shape: [order, 1]
         """
@@ -350,12 +361,16 @@ class Mapping(object):
 
 if __name__ == "__main__":
     plot_intensity = False
-    gcp_ose_standard = False
+    initial_example = True
+    gcp_ose_standard = True
     gcp_ose_alternative = True
+    gcp_ose_multidim = False
 
-    # present an example
-    torch.manual_seed(1)
     max_time = 10.0
+    if initial_example:
+        # present an example
+        # torch.manual_seed(1)
+        max_time = 10.0
 
     alpha = 8.0
     beta = 1.0
@@ -369,14 +384,31 @@ if __name__ == "__main__":
         plt.show()
     poisson_process = PoissonProcess(intensity, max_time)
     poisson_process.simulate()
-
     sample_data = poisson_process.get_data()
-    # print(sample_data)
 
     # set up the basis
 
+    use_chebyshev = True
     # set up the class
-    basis_functions = standard_chebyshev_basis
+    if use_chebyshev:
+        basis_functions = standard_chebyshev_basis
+        parameters: dict = {
+            "lower_bound": 0.0,
+            "upper_bound": max_time + 0.1,
+            "chebyshev": "second",
+        }
+        # parameters: dict = {
+        # "ard_parameter": torch.Tensor([1.0]),
+        # "precision_parameter": torch.Tensor([1.0]),
+        # "variance_parameter": torch.Tensor([1.0]),
+        # }
+    else:
+        basis_functions = smooth_exponential_basis_fasshauer
+        parameters: dict = {
+            "ard_parameter": torch.Tensor([1.0]),
+            "precision_parameter": torch.Tensor([1.0]),
+            "variance_parameter": torch.Tensor([1.0]),
+        }
     dimension = 1
     order = 6
     parameters: dict = {"lower_bound": 0.0, "upper_bound": max_time + 0.1}
@@ -391,9 +423,14 @@ if __name__ == "__main__":
         gcp_ose.add_data(sample_data)
         # breakpoint()
         posterior_mean = gcp_ose._get_posterior_mean()
-        # plt.plot(x, posterior_mean(x))
-        # plt.plot(x, intensity(x))
-        # plt.show()
+        plt.plot(x, posterior_mean(x))
+        plt.plot(x, intensity(x))
+        plt.legend(["Posterior mean estimate", "Intensity"])
+        plt.scatter(sample_data, torch.zeros_like(sample_data), marker=".")
+        # tikzplotlib.save(
+        # "/home/william/phd/tex_projects/jet_presentation/figures/gaussian_cox_process_example.tex"
+        # )
+        plt.show()
 
         gcp_ose.train()
         print(gcp_ose.eigenvalues)
@@ -408,9 +445,7 @@ if __name__ == "__main__":
         )
 
         # add the data
-        # breakpoint()
         gcp_ose.add_data(sample_data)
-        # breakpoint()
         posterior_mean = gcp_ose._get_posterior_mean()
         plt.plot(x, posterior_mean(x))
         plt.plot(x, intensity(x))
@@ -425,3 +460,49 @@ if __name__ == "__main__":
         print(gcp_ose.parameters)
         plt.plot(gcp_ose.eigenvalues)
         plt.show()
+
+    if gcp_ose_multidim:
+        dimension = 2
+        mv_mean = torch.Tensor([5.0, 5.0])
+        covariance = torch.Tensor([[5.0, 0.0], [0.0, 5.0]])
+
+        def multidim_intensity(x):
+            # breakpoint()
+            dist = D.MultivariateNormal(mv_mean, covariance)
+            return 40000 * torch.exp(dist.log_prob(x))
+
+        # intensity_guess = multidim_intensity(torch.Tensor([5.0, 5.0]))
+        intensity_guess = multidim_intensity(torch.ones(2))
+
+        # multidim Poisson process
+        poisson_process = PoissonProcess(
+            multidim_intensity, max_time, dimension=dimension
+        )
+        poisson_process.simulate()
+
+        sample_data = poisson_process.get_data()
+        basis_functions = [standard_chebyshev_basis] * dimension
+        order = 10
+        parameters: dict = [
+            {
+                "lower_bound": 0.0,
+                "upper_bound": max_time + 0.1,
+                "variance_parameter": 1.0,
+            },
+            {
+                "lower_bound": 0.0,
+                "upper_bound": max_time + 0.1,
+                "variance_parameter": 1.0,
+            },
+        ]
+        ortho_basis = Basis(basis_functions, dimension, order, parameters)
+        eigenvalue_generator = SmoothExponentialFasshauer(
+            order, dimension=dimension
+        )
+        hyperparameters = GCPOSEHyperparameters(basis=ortho_basis)
+        gcp_ose = OrthogonalSeriesCoxProcessParameterised(
+            hyperparameters, eigenvalue_generator
+        )
+
+        gcp_ose.add_data(poisson_process.get_data())
+        gcp_ose.train()
