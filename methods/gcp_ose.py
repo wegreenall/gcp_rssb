@@ -73,7 +73,19 @@ class OrthogonalSeriesCoxProcess(Method):
         )
 
     def get_kernel(self, left_points, right_points):
-        pass
+        eigenvalues = self.eigenvalues
+        basis = self.hyperparameters.basis
+        design_matrix = basis(left_points)
+        design_matrix_prime = basis(right_points)
+        kernel_matrix = torch.einsum(
+            "ij,jk,lk->il",
+            design_matrix,
+            torch.diag(eigenvalues),
+            design_matrix_prime,
+        )
+        plt.imshow(kernel_matrix)
+        plt.show()
+        return kernel_matrix
 
     def train(self) -> None:
         """
