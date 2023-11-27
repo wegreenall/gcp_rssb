@@ -15,7 +15,7 @@ def manual_bound_example():
 
     intensity = lambda t: 4 * (1 + torch.cos(t))
     max_time = 2 * np.pi
-    bound = 8.
+    bound = 8.0
 
     poisson_process = PoissonProcess(intensity, max_time, bound)
     poisson_process.simulate()
@@ -23,12 +23,19 @@ def manual_bound_example():
 
     X = torch.linspace(0, max_time, 200)
     Y = intensity(X)
-    plt.plot(X, Y, label='true intensity')
-    plt.plot(X, torch.ones_like(X) * bound, label='bound for intensity')
-    plt.scatter(points, torch.zeros_like(points), s=7., marker='x', label='simulated data')
-    plt.title('simulated data, manual bound')
+    plt.plot(X, Y, label="true intensity")
+    plt.plot(X, torch.ones_like(X) * bound, label="bound for intensity")
+    plt.scatter(
+        points,
+        torch.zeros_like(points),
+        s=7.0,
+        marker="x",
+        label="simulated data",
+    )
+    plt.title("simulated data, manual bound")
     plt.legend()
     plt.show()
+
 
 def automatic_bound_example():
     intensity = lambda t: 4 * (1 + torch.cos(t))
@@ -41,13 +48,20 @@ def automatic_bound_example():
 
     X = torch.linspace(0, max_time, 200)
     Y = intensity(X)
-    plt.plot(X, Y, label='true intensity')
-    plt.plot(X, torch.ones_like(X) * bound, label='bound for intensity')
-    plt.scatter(points, torch.zeros_like(points), s=7., marker='x', label='simulated data')
-    plt.title('simulated data, automatic bound')
+    plt.plot(X, Y, label="true intensity")
+    plt.plot(X, torch.ones_like(X) * bound, label="bound for intensity")
+    plt.scatter(
+        points,
+        torch.zeros_like(points),
+        s=7.0,
+        marker="x",
+        label="simulated data",
+    )
+    plt.title("simulated data, automatic bound")
     plt.legend()
     plt.show()
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     manual_bound_example()
     automatic_bound_example()

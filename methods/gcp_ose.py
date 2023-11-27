@@ -47,12 +47,14 @@ class OrthogonalSeriesCoxProcess(Method):
         self,
         gcp_ose_hyperparameters: GCPOSEHyperparameters,
         sigma: torch.Tensor,
+        deterministic: bool = False,
     ):
         self.hyperparameters = gcp_ose_hyperparameters
         self.data_points = None
         self.ose_coeffics = None
         self.trained = False
         self.sigma = sigma
+        self.deterministic = deterministic
 
     def add_data(self, data_points) -> None:
         """
@@ -76,6 +78,7 @@ class OrthogonalSeriesCoxProcess(Method):
             self.data_points,
             self.posterior_mean,
             self.sigma,
+            self.deterministic,
         )
 
     def get_kernel(self, left_points, right_points):
@@ -112,7 +115,7 @@ class OrthogonalSeriesCoxProcess(Method):
 
             # iterate until convergence
             new_guess = self.mapping(previous_guess)
-            while torch.norm(new_guess - previous_guess) > 1e-6:
+            while torch.norm(new_guess - previous_guess) > 1e-5:
                 previous_guess = new_guess
                 new_guess = self.mapping(previous_guess)
 
@@ -165,8 +168,9 @@ class OrthogonalSeriesCoxProcessParameterised(OrthogonalSeriesCoxProcess):
         gcp_ose_hyperparameters: GCPOSEHyperparameters,
         sigma: torch.Tensor,
         eigenvalue_generator: EigenvalueGenerator,
+        deterministic: bool = False,
     ):
-        super().__init__(gcp_ose_hyperparameters, sigma)
+        super().__init__(gcp_ose_hyperparameters, sigma, deterministic)
         self.eigenvalue_generator = eigenvalue_generator
         self.dimension = self.hyperparameters.basis.dimension
 
@@ -209,11 +213,12 @@ class OrthogonalSeriesCoxProcessParameterised(OrthogonalSeriesCoxProcess):
             counter = 0
 
             # begin the loop
-            while torch.norm(new_guess - previous_guess) > 1e-6:
+            while torch.norm(new_guess - previous_guess) > 1e-5:
                 counter += 1
                 if counter % 100 == 0:
                     print("Iteration:", counter)
                 print(colored("New iteration...", "green"))
+                print(torch.norm(new_guess - previous_guess))
                 previous_guess = new_guess
                 previous_parameters = new_parameters
 
@@ -247,18 +252,19 @@ class Mapping(object):
         data_points: torch.Tensor,
         posterior_mean: HilbertSpaceElement,
         sigma: torch.Tensor,
+        deterministic: bool = False,
     ):
         # save the parameters
         self.basis = basis
         self.data_points = data_points.squeeze()
         self.posterior_mean = posterior_mean
+        self.deterministic = deterministic
 
         # set up the mapping
         self.basis_matrix = self._get_basis_matrix()  # Φ
         self.weight_matrix = self._get_weight_matrix()  # W
         self.design_matrix = self._get_design_matrix()  # Φ'Φ
         self.sigma = sigma  # σ
-        print("passed_sigma", self.sigma)
         self.pseudodata = self._get_pseudodata()  # Y
 
         # # get composite elements
@@ -280,13 +286,13 @@ class Mapping(object):
 
         # term 2 : WΦ(Φ'Φ + σΛ^{-1})^{-1}Φ'Y
         internal_term = torch.linalg.inv(
-            self.design_matrix + self.sigma * torch.diag(inverse_eigenvalues)
+            self.design_matrix
+            + self.sigma**2 * torch.diag(inverse_eigenvalues)
         )
         term_2 = self.WPhi @ internal_term @ self.PhiY
         result = term_1 - term_2
 
-        result /= self.sigma
-        print("self.sigma", self.sigma)
+        result /= self.sigma**2
         return result
 
     def _get_basis_matrix(self) -> torch.Tensor:
@@ -329,8 +335,13 @@ class Mapping(object):
 
         Return shape: [n, 1]
         """
-        noise = D.Normal(0, 1).sample((self.data_points.shape[0],))
-        pseudodata = self.posterior_mean(self.data_points) + self.sigma * noise
+        if self.deterministic:
+            pseudodata = self.posterior_mean(self.data_points)
+        else:
+            noise = D.Normal(0, 1).sample((self.data_points.shape[0],))
+            pseudodata = (
+                self.posterior_mean(self.data_points) + self.sigma * noise
+            )
         return pseudodata
 
     # composite elements
@@ -364,6 +375,8 @@ if __name__ == "__main__":
     initial_example = True
     gcp_ose_standard = True
     gcp_ose_alternative = True
+    gcp_ose_standard_deterministic = False
+    gcp_ose_alternative_deterministic = False
     gcp_ose_multidim = False
 
     max_time = 10.0
@@ -410,10 +423,10 @@ if __name__ == "__main__":
             "variance_parameter": torch.Tensor([1.0]),
         }
     dimension = 1
-    order = 6
+    order = 5
     parameters: dict = {"lower_bound": 0.0, "upper_bound": max_time + 0.1}
     ortho_basis = Basis(basis_functions, dimension, order, parameters)
-    sigma = 12.0
+    sigma = torch.tensor(8.0)
     if gcp_ose_standard:
         hyperparameters = GCPOSEHyperparameters(basis=ortho_basis)
         gcp_ose = OrthogonalSeriesCoxProcess(hyperparameters, sigma)
@@ -442,6 +455,55 @@ if __name__ == "__main__":
         hyperparameters = GCPOSEHyperparameters(basis=ortho_basis)
         gcp_ose = OrthogonalSeriesCoxProcessParameterised(
             hyperparameters, sigma, eigenvalue_generator
+        )
+
+        # add the data
+        gcp_ose.add_data(sample_data)
+        posterior_mean = gcp_ose._get_posterior_mean()
+        plt.plot(x, posterior_mean(x))
+        plt.plot(x, intensity(x))
+        plt.show()
+
+        eigenvalues = gcp_ose.train()
+        print("############")
+        print("Eigenvalues:")
+        print(gcp_ose.eigenvalues)
+        print("############")
+        print("Parameters:")
+        print(gcp_ose.parameters)
+        plt.plot(gcp_ose.eigenvalues)
+        plt.show()
+
+    if gcp_ose_standard_deterministic:
+        hyperparameters = GCPOSEHyperparameters(basis=ortho_basis)
+        gcp_ose = OrthogonalSeriesCoxProcess(
+            hyperparameters, sigma, deterministic=True
+        )
+
+        # add the data
+        # breakpoint()
+        gcp_ose.add_data(sample_data)
+        # breakpoint()
+        posterior_mean = gcp_ose._get_posterior_mean()
+        plt.plot(x, posterior_mean(x))
+        plt.plot(x, intensity(x))
+        plt.legend(["Posterior mean estimate", "Intensity"])
+        plt.scatter(sample_data, torch.zeros_like(sample_data), marker=".")
+        # tikzplotlib.save(
+        # "/home/william/phd/tex_projects/jet_presentation/figures/gaussian_cox_process_example.tex"
+        # )
+        plt.show()
+
+        gcp_ose.train()
+        print(gcp_ose.eigenvalues)
+        plt.plot(gcp_ose.eigenvalues)
+        plt.show()
+
+    if gcp_ose_alternative_deterministic:
+        eigenvalue_generator = SmoothExponentialFasshauer(order)
+        hyperparameters = GCPOSEHyperparameters(basis=ortho_basis)
+        gcp_ose = OrthogonalSeriesCoxProcessParameterised(
+            hyperparameters, sigma, eigenvalue_generator, deterministic=True
         )
 
         # add the data

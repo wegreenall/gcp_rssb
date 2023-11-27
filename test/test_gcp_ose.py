@@ -15,6 +15,7 @@ class TestGcpOse(unittest.TestCase):
         torch.manual_seed(1)
         self.sample_size = 50
         self.sample_data = D.Uniform(0, 1).sample((50, 1))
+        self.sigma = 1.0
 
         # set up the class
         self.basis_functions = standard_chebyshev_basis
@@ -25,7 +26,9 @@ class TestGcpOse(unittest.TestCase):
             self.basis_functions, self.dimension, self.order, self.parameters
         )
         self.hyperparameters = GCPOSEHyperparameters(basis=self.ortho_basis)
-        self.gcp_ose = OrthogonalSeriesCoxProcess(self.hyperparameters)
+        self.gcp_ose = OrthogonalSeriesCoxProcess(
+            self.hyperparameters, self.sigma
+        )
 
     def test_get_ose_coeffics(self):
         self.gcp_ose.add_data(self.sample_data)
@@ -83,17 +86,20 @@ class TestMapping(unittest.TestCase):
         self.dimension = 1
         self.order = 10
         self.parameters = {}
+        self.sigma = torch.tensor(1.0)
         self.ortho_basis = Basis(
             self.basis_functions, self.dimension, self.order, self.parameters
         )
         self.hyperparameters = GCPOSEHyperparameters(basis=self.ortho_basis)
-        self.gcp_ose = OrthogonalSeriesCoxProcess(self.hyperparameters)
+        self.gcp_ose = OrthogonalSeriesCoxProcess(
+            self.hyperparameters, self.sigma
+        )
         self.gcp_ose.add_data(self.sample_data)
         self.posterior_mean = self.gcp_ose._get_posterior_mean()
 
         # mapping class
         self.mapping = Mapping(
-            self.ortho_basis, self.sample_data, self.posterior_mean
+            self.ortho_basis, self.sample_data, self.posterior_mean, self.sigma
         )
 
         # initial eigenvalues
