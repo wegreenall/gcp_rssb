@@ -12,6 +12,11 @@ from mercergp.eigenvalue_gen import (
     SmoothExponentialFasshauer,
 )
 
+torch.set_default_dtype(torch.float64)
+
+# set to cuda
+torch.set_default_tensor_type(torch.cuda.DoubleTensor)
+# torch.set_default_device("cuda")
 """
 In this script we will present the method by which the OSE classifier is set up.
 
@@ -48,11 +53,60 @@ Note 1:
 """
 
 
+def loop_hafnian_estimate(
+    kernel_matrix: torch.Tensor, mean_function: torch.Tensor, det_count: int
+) -> torch.Tensor:
+    """
+    Calculates the Barvinok estimator for the loop hafnian.
+    """
+    use_random_diagonal = False
+    # first calculate the hat kernel matrix
+    hat_kernel_matrix_zero_diag = kernel_matrix - torch.diag(kernel_matrix)
+    hat_kernel_matrix = hat_kernel_matrix_zero_diag + torch.diag(mean_function)
+
+    # generate the skew-symmetric matrix
+    gaussian_matrix = torch.einsum(
+        "ijn->nij",
+        (
+            D.Normal(0.0, 1.0).sample(
+                (kernel_matrix.shape[0], kernel_matrix.shape[0], det_count)
+            )
+        ),
+    )
+    mask = torch.eye(kernel_matrix.shape[0]).repeat(det_count, 1, 1).bool()
+    upper_triangular_matrix = torch.triu(gaussian_matrix)
+    lower_triangular_matrix = torch.transpose(upper_triangular_matrix, 1, 2)
+    if use_random_diagonal:
+        random_matrix = (
+            upper_triangular_matrix - lower_triangular_matrix
+        ).masked_fill(mask, 0.0)
+        random_diagonal = torch.einsum(
+            "ijn->nij",
+            (
+                D.Normal(0.0, 1.0).sample(
+                    (kernel_matrix.shape[0], kernel_matrix.shape[0], det_count)
+                )
+            )
+            ** 2,
+        )
+        random_matrix = torch.where(mask, random_diagonal, random_matrix)
+    else:
+        random_matrix = (
+            upper_triangular_matrix - lower_triangular_matrix
+        ).masked_fill(mask, 1.0)
+
+    estimator = torch.mean(
+        torch.logdet(random_matrix * hat_kernel_matrix), dim=0
+    )
+    estimator = torch.nan_to_num(estimator, nan=0.0)
+    return estimator
+
+
 if __name__ == "__main__":
     print("Starting the program!")
     plot_intensity = False  # flag for plotting the intensity.
     plot_data = False  # flag for plotting the data
-    train_eigenvalues = True
+    train_eigenvalues = False
 
     # Class 1 point process
     max_time = 10.0
@@ -69,12 +123,12 @@ if __name__ == "__main__":
     x = torch.linspace(0.1, max_time, 1000)
     if plot_intensity:
         plt.plot(
-            x,
-            intensity_1(x),
+            x.cpu().numpy(),
+            intensity_1(x).cpu().numpy(),
         )
         plt.plot(
-            x,
-            intensity_2(x),
+            x.cpu().numpy(),
+            intensity_2(x).cpu().numpy(),
         )
         plt.show()
     poisson_process_1 = PoissonProcess(intensity_1, max_time)
@@ -112,31 +166,34 @@ if __name__ == "__main__":
     order = 6
     basis_functions = standard_chebyshev_basis
     dimension = 1
-    order = 6
-    sigma = 7.0
+    sigma = 9.5
     parameters: dict = {"lower_bound": 0.0, "upper_bound": max_time + 0.1}
     ortho_basis = Basis(basis_functions, dimension, order, parameters)
 
     # model parameters
     eigenvalue_generator = SmoothExponentialFasshauer(order)
-    hyperparameters = GCPOSEHyperparameters(basis=ortho_basis)
+    hyperparameters = GCPOSEHyperparameters(
+        basis=ortho_basis, dimension=dimension
+    )
     gcp_ose_1 = OrthogonalSeriesCoxProcessParameterised(
         hyperparameters, sigma, eigenvalue_generator
     )
     gcp_ose_1.add_data(class_1_data)
     # breakpoint()
     posterior_mean_1 = gcp_ose_1._get_posterior_mean()
-    plt.plot(x, posterior_mean_1(x))
-    plt.plot(x, intensity_1(x))
-    plt.show()
     gcp_ose_2 = OrthogonalSeriesCoxProcessParameterised(
         hyperparameters, sigma, eigenvalue_generator
     )
     gcp_ose_2.add_data(class_2_data)
     posterior_mean_2 = gcp_ose_2._get_posterior_mean()
-    plt.plot(x, posterior_mean_2(x))
-    plt.plot(x, intensity_2(x))
-    plt.show()
+
+    if plot_intensity:
+        plt.plot(x.cpu().numpy(), posterior_mean_1(x).cpu().numpy())
+        plt.plot(x.cpu().numpy(), intensity_1(x).cpu().numpy())
+        plt.show()
+        plt.plot(x.cpu().numpy(), posterior_mean_2(x).cpu().numpy())
+        plt.plot(x.cpu().numpy(), intensity_2(x).cpu().numpy())
+        plt.show()
 
     # set up the eigenvalues
     if train_eigenvalues:
@@ -165,17 +222,53 @@ if __name__ == "__main__":
             torch.save(gcp_ose_2.eigenvalues, "eigenvalues_class_2.pt")
     else:
         # now load the eigenvalues
-        gcp_ose_1.eigenvalues = torch.load("eigenvalues_class_1.pt")
-        gcp_ose_2.eigenvalues = torch.load("eigenvalues_class_2.pt")
-
-    # plt.plot(gcp_ose_2.eigenvalues)
-    # plt.show()
+        gcp_ose_1.eigenvalues = torch.load("eigenvalues_class_1.pt").to("cuda")
+        gcp_ose_2.eigenvalues = torch.load("eigenvalues_class_2.pt").to("cuda")
 
     kernel_1 = gcp_ose_1.get_kernel(class_1_data, class_1_data)
     kernel_2 = gcp_ose_2.get_kernel(class_2_data, class_2_data)
+    plt.imshow(kernel_1.cpu())
+    plt.show()
+    plt.imshow(kernel_2.cpu())
+    plt.show()
 
-    test_axis = torch.linspace(0.0, max_time, 1000)
-    for x in test_axis:
+    fineness = 100
+    test_axis = torch.linspace(0.0, max_time, fineness)
+    estimators = torch.zeros(fineness)
+    estimators_2 = torch.zeros(fineness)
+    for i, x in enumerate(test_axis):
+        class_data_1_augmented = torch.cat((class_1_data, torch.Tensor([x])))
+        class_data_2_augmented = torch.cat((class_2_data, torch.Tensor([x])))
+        kernel_1_augmented = gcp_ose_1.get_kernel(
+            class_data_1_augmented, class_data_1_augmented
+        )
+        kernel_2_augmented = gcp_ose_2.get_kernel(
+            class_data_2_augmented, class_data_2_augmented
+        )
         # build the kernel matrix with this augmented object
+        numerator = loop_hafnian_estimate(
+            kernel_1_augmented, posterior_mean_1(class_data_1_augmented), 1000
+        )
+        denominator = loop_hafnian_estimate(
+            kernel_1, posterior_mean_1(class_1_data), 1000
+        )
+        numerator_2 = loop_hafnian_estimate(
+            kernel_2_augmented, posterior_mean_2(class_data_2_augmented), 1000
+        )
+        denominator_2 = loop_hafnian_estimate(
+            kernel_2, posterior_mean_2(class_2_data), 1000
+        )
+        estimator = torch.exp(numerator - denominator)
+        estimator_2 = torch.exp(numerator_2 - denominator_2)
+        estimators[i] = estimator
+        estimators_2[i] = estimator_2
 
-        pass
+    plt.plot(
+        test_axis.cpu().numpy(),
+        (estimators / (estimators + estimators_2)).cpu().numpy(),
+    )
+    plt.plot(
+        test_axis.cpu().numpy(),
+        (estimators_2 / (estimators + estimators_2)).cpu().numpy(),
+    )
+    plt.show()

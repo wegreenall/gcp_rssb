@@ -28,6 +28,7 @@ from termcolor import colored
 @dataclass
 class GCPOSEHyperparameters:
     basis: Basis
+    dimension: int
     # eigenvalue_generator: EigenvalueGenerator
 
 
@@ -82,18 +83,18 @@ class OrthogonalSeriesCoxProcess(Method):
         )
 
     def get_kernel(self, left_points, right_points):
+        # return self.kernel(left_points, right_points)
         eigenvalues = self.eigenvalues
         basis = self.hyperparameters.basis
         design_matrix = basis(left_points)
         design_matrix_prime = basis(right_points)
+        # breakpoint()
         kernel_matrix = torch.einsum(
             "ij,jk,lk->il",
             design_matrix,
             torch.diag(eigenvalues),
             design_matrix_prime,
         )
-        plt.imshow(kernel_matrix)
-        plt.show()
         return kernel_matrix
 
     def train(self) -> None:
@@ -374,7 +375,7 @@ if __name__ == "__main__":
     plot_intensity = False
     initial_example = True
     gcp_ose_standard = True
-    gcp_ose_alternative = True
+    gcp_ose_alternative = False
     gcp_ose_standard_deterministic = False
     gcp_ose_alternative_deterministic = False
     gcp_ose_multidim = False
@@ -423,19 +424,26 @@ if __name__ == "__main__":
             "variance_parameter": torch.Tensor([1.0]),
         }
     dimension = 1
-    order = 5
+    order = 6
     parameters: dict = {"lower_bound": 0.0, "upper_bound": max_time + 0.1}
     ortho_basis = Basis(basis_functions, dimension, order, parameters)
     sigma = torch.tensor(8.0)
     if gcp_ose_standard:
-        hyperparameters = GCPOSEHyperparameters(basis=ortho_basis)
+        hyperparameters = GCPOSEHyperparameters(
+            basis=ortho_basis, dimension=dimension
+        )
         gcp_ose = OrthogonalSeriesCoxProcess(hyperparameters, sigma)
 
         # add the data
-        # breakpoint()
         gcp_ose.add_data(sample_data)
-        # breakpoint()
         posterior_mean = gcp_ose._get_posterior_mean()
+        plt.legend(["ose_coeffics"])
+        plt.plot(gcp_ose.ose_coeffics)
+        plt.show()
+        plt.legend(["ose square coeffics"])
+        plt.plot(gcp_ose.ose_square_coeffics)
+        plt.show()
+
         plt.plot(x, posterior_mean(x))
         plt.plot(x, intensity(x))
         plt.legend(["Posterior mean estimate", "Intensity"])
@@ -452,7 +460,9 @@ if __name__ == "__main__":
 
     if gcp_ose_alternative:
         eigenvalue_generator = SmoothExponentialFasshauer(order)
-        hyperparameters = GCPOSEHyperparameters(basis=ortho_basis)
+        hyperparameters = GCPOSEHyperparameters(
+            basis=ortho_basis, dimension=dimension
+        )
         gcp_ose = OrthogonalSeriesCoxProcessParameterised(
             hyperparameters, sigma, eigenvalue_generator
         )
@@ -509,9 +519,10 @@ if __name__ == "__main__":
         # add the data
         gcp_ose.add_data(sample_data)
         posterior_mean = gcp_ose._get_posterior_mean()
-        plt.plot(x, posterior_mean(x))
-        plt.plot(x, intensity(x))
-        plt.show()
+        # breakpoint()
+        # plt.plot(x, posterior_mean(x))
+        # plt.plot(x, intensity(x))
+        # plt.show()
 
         eigenvalues = gcp_ose.train()
         print("############")
@@ -544,7 +555,7 @@ if __name__ == "__main__":
 
         sample_data = poisson_process.get_data()
         basis_functions = [standard_chebyshev_basis] * dimension
-        order = 10
+        order = 6
         parameters: dict = [
             {
                 "lower_bound": 0.0,
