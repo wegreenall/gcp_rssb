@@ -57,7 +57,7 @@ class OrthogonalSeriesCoxProcess(Method):
         self.sigma = sigma
         self.deterministic = deterministic
 
-    def add_data(self, data_points) -> None:
+    def add_data(self, data_points: torch.Tensor) -> None:
         """
         Adds the data to the model.
 
@@ -88,7 +88,6 @@ class OrthogonalSeriesCoxProcess(Method):
         basis = self.hyperparameters.basis
         design_matrix = basis(left_points)
         design_matrix_prime = basis(right_points)
-        # breakpoint()
         kernel_matrix = torch.einsum(
             "ij,jk,lk->il",
             design_matrix,

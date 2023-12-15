@@ -10,7 +10,7 @@ from mercergp.eigenvalue_gen import (
     SmoothExponentialFasshauer,
 )
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, List
 
 from gcp_rssb.data import PoissonProcess
 from ortho.basis_functions import (
@@ -37,6 +37,55 @@ torch.set_default_dtype(torch.float64)
 
 # set to cuda
 torch.set_default_tensor_type(torch.cuda.DoubleTensor)
+
+
+class BayesianPointProcessClassifier:
+    def __init__(
+        self,
+        order: int,
+        basis: Basis,
+        dimension: int,
+        prior_parameters: PriorParameters,
+    ):
+        self.order = order
+        self.basis = basis
+        self.dimension = dimension
+        self.prior_parameters = PriorParameters
+
+        # set up classes
+        self.class_count: int = 0
+        self.classes_data: List[torch.Tensor] = []
+        self.gcps: List[OrthogonalSeriesCoxProcess] = []
+
+    def add_class(
+        self,
+        data: torch.Tensor,
+        gcp_ose_hyperparameters: GCPOSEHyperparameters,
+    ):
+        """
+        Add a new class via a set of data. Initialises a new GCP.
+        """
+        # add data
+        self.classes_data.append(data)
+        self.class_count += 1
+
+        # initialise a new GCP
+        gcp = OrthogonalSeriesCoxProcess(
+            self.order,
+            self.basis,
+            self.dimension,
+            GCPOSEHyperparameters(),
+        )
+        gcp.add_data(data)
+        self.gcps.append(gcp)
+
+    def get_posterior_mean(self):
+        """
+        Returns the posterior mean of the classifier.
+        """
+        for i, gcp in enumerate(self.gcps):
+            posterior_mean[i, :] = gcp.get_posterior_mean()
+        return posterior_mean
 
 
 if __name__ == "__main__":
@@ -87,8 +136,8 @@ if __name__ == "__main__":
     hyperparameters = GCPOSEHyperparameters(
         basis=ortho_basis, dimension=dimension
     )
-    gcp_ose_1 = MomentMatchingOrthogonalSeriesCoxProcess(hyperparameters)
-    gcp_ose_2 = MomentMatchingOrthogonalSeriesCoxProcess(hyperparameters)
+    gcp_ose_1 = BayesianPointProcessClassifier(hyperparameters)
+    gcp_ose_2 = BayesianPointProcessClassifier(hyperparameters)
 
     # add the data
     gcp_ose_1.add_data(class_1_data)
