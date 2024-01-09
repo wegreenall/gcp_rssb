@@ -231,7 +231,7 @@ class OrthogonalSeriesCoxProcessParameterised(OrthogonalSeriesCoxProcess):
                 plt.plot(1 / new_guess)
 
             self.eigenvalues = self.eigenvalue_generator(new_parameters)
-            plt.plot(self.eigenvalues, color="red")
+            plt.plot(self.eigenvalues.cpu(), color="red")
             plt.show()
             self.trained = True
             self.parameters = new_parameters
