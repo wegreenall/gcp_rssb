@@ -23,7 +23,10 @@ from ortho.basis_functions import (
 import matplotlib.pyplot as plt
 import tikzplotlib
 from termcolor import colored
-from gcp_ose import OrthogonalSeriesCoxProcess, GCPOSEHyperparameters
+from gcp_rssb.methods.gcp_ose import (
+    OrthogonalSeriesCoxProcess,
+    GCPOSEHyperparameters,
+)
 
 # from gcp_ose_bayesian import BayesianOrthogonalSeriesCoxProcess
 from gcp_rssb.methods.gcp_ose_classifier import loop_hafnian_estimate
@@ -87,9 +90,6 @@ class BayesianOrthogonalSeriesCoxProcess(OrthogonalSeriesCoxProcess):
         numerator = 2 * beta + (nu / (nu + 1)) * self.ose_coeffics**2
         denominator = 2 * alpha - 1
         eigenvalues = numerator / denominator
-        # breakpoint()
-        plt.plot(eigenvalues.cpu().numpy())
-        plt.show()
         return eigenvalues
 
     def _get_posterior_mean(self):
