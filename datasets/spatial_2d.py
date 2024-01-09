@@ -15,6 +15,7 @@ from ortho.basis_functions import Basis, standard_chebyshev_basis
 from typing import List
 
 import matplotlib.pyplot as plt
+from termcolor import colored
 
 if __name__ == "__main__":
     """
@@ -46,13 +47,20 @@ if __name__ == "__main__":
     posterior_means_list = []
     posterior_mean_coeffics_list = []
     eigenvalues_list = []
-    for data_set in data_sets:
+
+    for data_set, data_set_name in zip(data_sets, dataset_names):
         # get the minimum/maximum time and use them to set the bounds
-        breakpoint()
         min_time_x = data_set[:, 0].min()
         max_time_x = data_set[:, 0].max()
         max_time_y = data_set[:, 1].max()
         min_time_y = data_set[:, 1].min()
+
+        # 2d plotting stuff
+        x_axis = torch.linspace(min_time_x, max_time_x, 1000)
+        y_axis = torch.linspace(min_time_y, max_time_y, 1000)
+        X, Y = torch.meshgrid(x_axis, y_axis)
+        Z = torch.stack((X, Y), dim=2)
+        Z = Z.reshape(-1, 2)
 
         parameters: List = [
             {
@@ -66,7 +74,10 @@ if __name__ == "__main__":
                 #                "variance_parameter": 1.0,
             },
         ]
-        order = 10
+        order = 20
+        print("data set shape: {}".format(data_set.shape))
+        print("data set name: {}".format(data_set_name))
+
         chebyshev_basis = Basis(basis_functions, dim, order, parameters)
         gcp_ose_hyperparameters = GCPOSEHyperparameters(
             basis=chebyshev_basis,
@@ -90,7 +101,15 @@ if __name__ == "__main__":
         )
         posterior_mean_coeffics_list.append(posterior_mean_coeffics)
         posterior_mean = gcp_ose_model._get_posterior_mean()
-        posterior_means_list.append(posterior_mean)
+        posterior_means_list.append(
+            posterior_mean
+        )  # something bad is happening here.
+
+        # plot posterior mean
+        output = posterior_mean(Z).cpu().numpy().reshape(1000, 1000)
+        plt.contourf(X.cpu().numpy(), Y.cpu().numpy(), output)
+        plt.scatter(data_set.cpu().numpy()[:, 0], data_set.cpu().numpy()[:, 1])
+        plt.show()
 
     # eigenvalues plot
     for eigenvalues in eigenvalues_list:
@@ -100,11 +119,4 @@ if __name__ == "__main__":
     # posterior mean coefficients plot
     for posterior_mean_coeffics in posterior_mean_coeffics_list:
         plt.plot(posterior_mean_coeffics)
-    plt.show()
-
-    # now do 2d plotting stuff
-    x_axis = torch.linspace(min_time_x, max_time_x, 1000)
-    y_axis = torch.linspace(min_time_y, max_time_y, 1000)
-    for posterior_mean in posterior_means_list:
-        plt.plot(posterior_mean(x_axis).cpu().numpy())
     plt.show()

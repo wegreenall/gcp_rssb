@@ -33,7 +33,7 @@ if __name__ == "__main__":
             "variance_parameter": 1.0,
         },
     ]
-    order = 10
+    order = 20
     chebyshev_basis = Basis(basis_functions, dim, order, parameters)
     gcp_ose_hyperparameters = GCPOSEHyperparameters(
         basis=chebyshev_basis,
