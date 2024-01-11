@@ -72,7 +72,7 @@ if __name__ == "__main__":
         posterior_mean_coeffics_list.append(posterior_mean_coeffics)
         posterior_mean = gcp_ose_model._get_posterior_mean()
         posterior_means_list.append(posterior_mean)
-
+    fig, ax = plt.subplots()
     x_axis = torch.linspace(0, max_time, 1000)
     # eigenvalues plot
     for eigenvalues in eigenvalues_list:

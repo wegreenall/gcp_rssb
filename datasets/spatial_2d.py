@@ -107,7 +107,9 @@ if __name__ == "__main__":
 
         # plot posterior mean
         output = posterior_mean(Z).cpu().numpy().reshape(1000, 1000)
-        plt.contourf(X.cpu().numpy(), Y.cpu().numpy(), output)
+        plt.contourf(X.cpu().numpy(), Y.cpu().numpy(), output, cmap="YlOrRd")
+        plt.contour(X.cpu().numpy(), Y.cpu().numpy(), output)
+        plt.colorbar()
         plt.scatter(data_set.cpu().numpy()[:, 0], data_set.cpu().numpy()[:, 1])
         plt.show()
 

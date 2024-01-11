@@ -66,6 +66,7 @@ if __name__ == "__main__":
             gcp_ose_model._get_posterior_eigenvalue_estimates().cpu().numpy()
         )
         eigenvalues_list.append(eigenvalues)
+
         # plt.plot(eigenvalues)
         posterior_mean_coeffics = (
             gcp_ose_model._get_posterior_mean_coefficients().cpu().numpy()
