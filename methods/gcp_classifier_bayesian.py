@@ -30,7 +30,7 @@ from gcp_rssb.methods.gcp_ose import (
 from gcp_rssb.methods.gcp_ose_moment_matching import (
     MomentMatchingOrthogonalSeriesCoxProcess,
 )
-
+from gcp_rssb.methods.gcp_ose_bayesian import PriorParameters
 from gcp_rssb.methods.gcp_ose_classifier import loop_hafnian_estimate
 
 torch.set_default_dtype(torch.float64)
@@ -146,7 +146,6 @@ if __name__ == "__main__":
     order = 6
     basis_functions = standard_chebyshev_basis
     dimension = 1
-    # sigma = 9.5
     ortho_basis = Basis(basis_functions, dimension, order, parameters)
 
     # model parameters

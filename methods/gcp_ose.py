@@ -21,7 +21,6 @@ from ortho.basis_functions import (
 )
 
 import matplotlib.pyplot as plt
-import tikzplotlib
 from termcolor import colored
 
 
