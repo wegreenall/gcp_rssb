@@ -29,7 +29,7 @@ from gcp_rssb.methods.gcp_ose import (
 )
 
 # from gcp_ose_bayesian import BayesianOrthogonalSeriesCoxProcess
-from gcp_rssb.methods.gcp_ose_classifier import loop_hafnian_estimate
+# from gcp_rssb.methods.gcp_ose_classifier import loop_hafnian_estimate
 
 
 @dataclass
@@ -37,6 +37,11 @@ class PriorParameters:
     mean: torch.Tensor
     alpha: torch.Tensor
     beta: torch.Tensor
+    nu: torch.Tensor
+
+
+@dataclass
+class DataInformedPriorParameters:
     nu: torch.Tensor
 
 
@@ -168,6 +173,38 @@ class BayesianOrthogonalSeriesCoxProcessObservationNoise(
         return coeffics
 
 
+class DataInformedBayesOSECP(BayesianOrthogonalSeriesCoxProcess):
+    """
+    The DataInformedBayesOSECP is a Bayesian Orthogonal Series Cox Process
+    with observation noise, with data-informed prior.
+
+    To construct this, we actually only have to construct the
+    observation-noise-aware Bayesian Orthogonal Series Cox Process, using the
+    following values for the first three prior parameters:
+        mean: 0
+        alpha: 1.5
+        beta: \sum_{i=1}^n \phi_j(x_i)
+
+    This is equivalent to setting beta to 0 in the standard
+    BayesianOrthogonalSeriesCoxProcess, as then we are subtracting precisely
+    the correct amount from the eigenvalue estimates.
+
+    """
+
+    def __init__(
+        self,
+        hyperparameters: GCPOSEHyperparameters,
+        data_informed_prior_parameters: DataInformedPriorParameters,
+    ):
+        prior_parameters = PriorParameters(
+            mean=torch.tensor(0.0),
+            alpha=torch.tensor(1.5),
+            beta=torch.tensor(0.0),
+            nu=data_informed_prior_parameters.nu,
+        )
+        super().__init__(hyperparameters, prior_parameters)
+
+
 if __name__ == "__main__":
     plot_intensity = False
     run_classifier = True
@@ -227,204 +264,3 @@ if __name__ == "__main__":
     hyperparameters = GCPOSEHyperparameters(
         basis=ortho_basis, dimension=dimension
     )
-    if run_standard:
-        gcp_ose_1 = BayesianOrthogonalSeriesCoxProcess(
-            hyperparameters, prior_parameters
-        )
-        gcp_ose_2 = BayesianOrthogonalSeriesCoxProcess(
-            hyperparameters, prior_parameters
-        )
-
-        # add the data
-        gcp_ose_1.add_data(class_1_data)
-        gcp_ose_2.add_data(class_2_data)
-
-        order = 6
-        basis_functions = standard_chebyshev_basis
-        dimension = 1
-        # sigma = 9.5
-        ortho_basis = Basis(basis_functions, dimension, order, parameters)
-
-        # model parameters
-        hyperparameters = GCPOSEHyperparameters(
-            basis=ortho_basis, dimension=dimension
-        )
-        posterior_mean_1 = gcp_ose_1._get_posterior_mean()
-        posterior_mean_2 = gcp_ose_2._get_posterior_mean()
-        if plot_intensity:
-            plt.plot(x.cpu().numpy(), posterior_mean_1(x).cpu().numpy())
-            plt.plot(x.cpu().numpy(), intensity_1(x).cpu().numpy())
-            plt.show()
-            plt.plot(x.cpu().numpy(), posterior_mean_2(x).cpu().numpy())
-            plt.plot(x.cpu().numpy(), intensity_2(x).cpu().numpy())
-            plt.show()
-
-        # gcp_ose_1.eigenvalues /= torch.max(gcp_ose_1.eigenvalues)
-        # gcp_ose_2.eigenvalue /= torch.max(gcp_ose_2.eigenvalues)
-        kernel_1 = gcp_ose_1.get_kernel(class_1_data, class_1_data)
-        kernel_2 = gcp_ose_2.get_kernel(class_2_data, class_2_data)
-
-        plt.plot(gcp_ose_1.eigenvalues.cpu().numpy())
-        plt.plot(gcp_ose_2.eigenvalues.cpu().numpy())
-        plt.legend(("eigenvalues one", "eigenvalues two"))
-        plt.show()
-
-        # run the classifier
-        fineness = 100
-        test_axis = torch.linspace(0.0, max_time, fineness)
-        estimators = torch.zeros(fineness)
-        estimators_2 = torch.zeros(fineness)
-        for i, x in enumerate(test_axis):
-            class_data_1_augmented = torch.cat(
-                (class_1_data, torch.Tensor([x]))
-            )
-            class_data_2_augmented = torch.cat(
-                (class_2_data, torch.Tensor([x]))
-            )
-            kernel_1_augmented = gcp_ose_1.get_kernel(
-                class_data_1_augmented, class_data_1_augmented
-            )
-            kernel_2_augmented = gcp_ose_2.get_kernel(
-                class_data_2_augmented, class_data_2_augmented
-            )
-
-            # build the kernel matrix with this augmented object
-            numerator = loop_hafnian_estimate(
-                kernel_1_augmented,
-                posterior_mean_1(class_data_1_augmented),
-                1000,
-            )
-            denominator = loop_hafnian_estimate(
-                kernel_1, posterior_mean_1(class_1_data), 1000
-            )
-            numerator_2 = loop_hafnian_estimate(
-                kernel_2_augmented,
-                posterior_mean_2(class_data_2_augmented),
-                1000,
-            )
-            denominator_2 = loop_hafnian_estimate(
-                kernel_2, posterior_mean_2(class_2_data), 1000
-            )
-            estimator = torch.exp(numerator - denominator)
-            estimator_2 = torch.exp(numerator_2 - denominator_2)
-            estimators[i] = estimator
-            estimators_2[i] = estimator_2
-
-        plt.plot(
-            test_axis.cpu().numpy(), torch.Tensor(estimators).cpu().numpy()
-        )
-        plt.plot(
-            test_axis.cpu().numpy(), torch.Tensor(estimators_2).cpu().numpy()
-        )
-        plt.show()
-
-        plt.plot(
-            test_axis.cpu().numpy(),
-            (estimators / (estimators + estimators_2)).cpu().numpy(),
-        )
-        plt.plot(
-            test_axis.cpu().numpy(),
-            (estimators_2 / (estimators + estimators_2)).cpu().numpy(),
-        )
-        plt.show()
-
-    if run_observation_noise:
-        gcp_ose_1 = BayesianOrthogonalSeriesCoxProcessObservationNoise(
-            hyperparameters, prior_parameters
-        )
-        gcp_ose_2 = BayesianOrthogonalSeriesCoxProcessObservationNoise(
-            hyperparameters, prior_parameters
-        )
-
-        # add the data
-        gcp_ose_1.add_data(class_1_data)
-        gcp_ose_2.add_data(class_2_data)
-
-        order = 6
-        basis_functions = standard_chebyshev_basis
-        dimension = 1
-        # sigma = 9.5
-        ortho_basis = Basis(basis_functions, dimension, order, parameters)
-
-        # model parameters
-        hyperparameters = GCPOSEHyperparameters(
-            basis=ortho_basis, dimension=dimension
-        )
-        posterior_mean_1 = gcp_ose_1._get_posterior_mean()
-        posterior_mean_2 = gcp_ose_2._get_posterior_mean()
-        if plot_intensity:
-            plt.plot(x.cpu().numpy(), posterior_mean_1(x).cpu().numpy())
-            plt.plot(x.cpu().numpy(), intensity_1(x).cpu().numpy())
-            plt.show()
-            plt.plot(x.cpu().numpy(), posterior_mean_2(x).cpu().numpy())
-            plt.plot(x.cpu().numpy(), intensity_2(x).cpu().numpy())
-            plt.show()
-
-        # gcp_ose_1.eigenvalues /= torch.max(gcp_ose_1.eigenvalues)
-        # gcp_ose_2.eigenvalue /= torch.max(gcp_ose_2.eigenvalues)
-        kernel_1 = gcp_ose_1.get_kernel(class_1_data, class_1_data)
-        kernel_2 = gcp_ose_2.get_kernel(class_2_data, class_2_data)
-
-        plt.plot(gcp_ose_1.eigenvalues.cpu().numpy())
-        plt.plot(gcp_ose_2.eigenvalues.cpu().numpy())
-        plt.legend(("obs_noise eigenvalues one", "obs_noise eigenvalues two"))
-        plt.show()
-
-        # run the classifier
-        fineness = 100
-        test_axis = torch.linspace(0.0, max_time, fineness)
-        estimators = torch.zeros(fineness)
-        estimators_2 = torch.zeros(fineness)
-        for i, x in enumerate(test_axis):
-            class_data_1_augmented = torch.cat(
-                (class_1_data, torch.Tensor([x]))
-            )
-            class_data_2_augmented = torch.cat(
-                (class_2_data, torch.Tensor([x]))
-            )
-            kernel_1_augmented = gcp_ose_1.get_kernel(
-                class_data_1_augmented, class_data_1_augmented
-            )
-            kernel_2_augmented = gcp_ose_2.get_kernel(
-                class_data_2_augmented, class_data_2_augmented
-            )
-
-            # build the kernel matrix with this augmented object
-            numerator = loop_hafnian_estimate(
-                kernel_1_augmented,
-                posterior_mean_1(class_data_1_augmented),
-                1000,
-            )
-            denominator = loop_hafnian_estimate(
-                kernel_1, posterior_mean_1(class_1_data), 1000
-            )
-            numerator_2 = loop_hafnian_estimate(
-                kernel_2_augmented,
-                posterior_mean_2(class_data_2_augmented),
-                1000,
-            )
-            denominator_2 = loop_hafnian_estimate(
-                kernel_2, posterior_mean_2(class_2_data), 1000
-            )
-            estimator = torch.exp(numerator - denominator)
-            estimator_2 = torch.exp(numerator_2 - denominator_2)
-            estimators[i] = estimator
-            estimators_2[i] = estimator_2
-
-        plt.plot(
-            test_axis.cpu().numpy(), torch.Tensor(estimators).cpu().numpy()
-        )
-        plt.plot(
-            test_axis.cpu().numpy(), torch.Tensor(estimators_2).cpu().numpy()
-        )
-        plt.show()
-
-        plt.plot(
-            test_axis.cpu().numpy(),
-            (estimators / (estimators + estimators_2)).cpu().numpy(),
-        )
-        plt.plot(
-            test_axis.cpu().numpy(),
-            (estimators_2 / (estimators + estimators_2)).cpu().numpy(),
-        )
-        plt.show()
