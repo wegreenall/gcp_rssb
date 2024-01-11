@@ -3,6 +3,13 @@ from gcp_rssb.methods.gcp_ose import (
     OrthogonalSeriesCoxProcessParameterised,
     GCPOSEHyperparameters,
 )
+from gcp_rssb.methods.gcp_ose_bayesian import (
+    PriorParameters,
+    DataInformedPriorParameters,
+    BayesianOrthogonalSeriesCoxProcess,
+    BayesianOrthogonalSeriesCoxProcessObservationNoise,
+    DataInformedBayesOSECP,
+)
 import torch
 import torch.distributions as D
 import matplotlib.pyplot as plt
@@ -11,60 +18,191 @@ from mercergp.eigenvalue_gen import (
     EigenvalueGenerator,
     SmoothExponentialFasshauer,
 )
+from typing import Union, List
 
 torch.set_default_dtype(torch.float64)
 
 # set to cuda
 torch.set_default_tensor_type(torch.cuda.DoubleTensor)
 # torch.set_default_device("cuda")
-"""
-In this script we will present the method by which the OSE classifier is set up.
+from termcolor import colored
 
-Note 1:
-    Suppose each class has a point process on a space $\mathcal{X}.
-    The superposition process is the union of all the per-class point processes.
-    u: the units or specimens (i.e., images of lentils)
-    x(u): the location of the specimen u; i.e. the feature vector associated with u
-    y(x): the class of the specimen u
-    y^{-1}(r): the set of all specimens of class r
-    
-    It is shown by McCullagh and Yang that the probability that is assigned to a given
-    class should be:
-        prob(y(u') = r | data) = \frac{m^(r)(x U x')}{m^r(x)}
 
-    where m^r(x) is the k-point correlation function of the point process of 
-    class r at location x. 
-    The k-point correlation function of that process is given by:
-        m^r(x) = E[X_1.X_2.X_3...X_k]
+class GCPClassifier:
+    """
+    GCP Classifier: represents the classifier based in the Gaussian Cox process
+    method we have developed, and using the Barvinok estimator for the loop
+    hafnian to get the k-point correlation function.
+
+    Suppose each class in the data is represented as a point process on a space
+    $\mathcal{X}. The superposition process is the union of all the per-class
+    point processes. u: the units or specimens (i.e., images of lentils) x(u):
+        the location of the specimen u; i.e. the feature vector associated with
+        u y(x): the class of the specimen u y^{-1}(r): the set of all specimens
+        of class r
+
+    It is shown by McCullagh and Yang that the probability that is assigned to
+    a given class should be: prob(y(u') = r | data) = \frac{m^(r)(x U
+                                                                  x')}{m^r(x)}
+
+    where m^r(x) is the k-point correlation function of the point process of
+    class r at location x. The k-point correlation function of that process is
+    given by: m^r(x) = E[X_1.X_2.X_3...X_k]
 
     i.e., the k-th moment. The result is that the probability of a given class
     requires calculation of the ratio of these k-th moment objects.
 
-    Note however, that in our case, $Λ(χ)$ is technically a Gaussian random 
-    variable, at all locations where there were points. As a result, the 
-    k-point correlation function yields Isserlis' theorem, (also known as the 
-    Wick probability formula) which states that
-     E[X_1.X_2.X_3...X_k] = \sum_{\sigma \in S_k} \prod_{{i,j} \in \sigma} E[X_iX_j]
-     where S_k is the set of derangements whose square is the identity.
-    as a result. This is the hafnian of the covariance matrix.
+    Note however, that in our case, $Λ(χ)$ is technically a Gaussian random
+    variable, at all locations where there were points. As a result, the
+    k-point correlation function yields Isserlis' theorem, (also known as the
+                                                            Wick probability
+                                                            formula) which
+    states that E[X_1.X_2.X_3...X_k] = \sum_{\sigma \in S_k} \prod_{{i,j} \in
+                                                                    \sigma}
+    E[X_iX_j] where S_k is the set of derangements whose square is the
+    identity. as a result. This is the hafnian of the covariance matrix.
 
-    As a result, we can apply the Barvinok estimator of the hafnian approach
-    to get a definite probability.
-"""
+    As a result, we can apply the Barvinok estimator of the hafnian approach to
+    get a definite probability.
+
+    The classifier therefore is constructed by building a Gaussian Cox process
+    model for each of the classes, and then using the Barvinok estimator to
+    approximate its k-point correlation function.
+    """
+
+    def __init__(
+        self,
+        class_count: int,
+        parameters: Union[List[PriorParameters], PriorParameters],
+        hyperparameters: Union[
+            List[GCPOSEHyperparameters], GCPOSEHyperparameters
+        ],
+        data_informed: bool = False,
+    ):
+        self.class_count = class_count
+        self.data_informed = data_informed
+        self.cox_processes = self._parse_cox_processes(
+            parameters, hyperparameters
+        )
+
+    def _parse_cox_processes(
+        self,
+        parameter: Union[List[PriorParameters], PriorParameters],
+        hyperparameters: Union[
+            List[GCPOSEHyperparameters], GCPOSEHyperparameters
+        ],
+    ) -> List[BayesianOrthogonalSeriesCoxProcess]:
+        """
+        Captures the cases for the different combinations of inputs and
+        parses them to create appropriate Cox processes.
+        """
+        if self.data_informed:
+            cox_process_type = DataInformedBayesOSECP
+        else:
+            cox_process_type = BayesianOrthogonalSeriesCoxProcess
+
+        case_1 = isinstance(parameter, PriorParameters) and isinstance(
+            hyperparameters, GCPOSEHyperparameters
+        )
+        case_2 = isinstance(parameter, list) and isinstance(
+            hyperparameters, list
+        )
+        if case_1:  # single parameter and hyperparameter set
+            return [
+                cox_process_type(hyperparameters, parameter)
+                for _ in range(self.class_count)
+            ]
+        elif case_2:  # a list of different sets, one set for each process
+            return [
+                cox_process_type(hyperparameter_set, parameter_set)
+                for hyperparameter_set, parameter_set in zip(
+                    hyperparameters, parameter
+                )
+            ]
+        else:
+            raise ValueError(
+                "Please pass either a single parameter and hyperparameter set,\
+                or a lists of parameter and hyperparameter sets."
+            )
+
+    def add_data(self, data: torch.Tensor, class_index: int):
+        """
+        Adds data to the appropriate Cox process.
+        """
+        self.cox_processes[class_index].add_data(data)
+
+    def predict_point(self, test_points: torch.Tensor) -> torch.Tensor:
+        """
+        Outputs class probabilities for a set of test points.
+
+        Input shape: (N, d)
+        Output shape: (N, C)
+        """
+        log_numerators = torch.zeros(test_points.shape[0], self.class_count)
+        log_denominators = torch.zeros(1, self.class_count)
+
+        # denominators
+        for i, cox_process in enumerate(self.cox_processes):
+            data_points = cox_process.data_points
+            log_denominators[:, i] = self._get_estimators(
+                data_points, cox_process
+            )
+        log_denominators_repeated = log_denominators.repeat(
+            test_points.shape[0], 1
+        )
+
+        # numerators
+        for c, cox_process in enumerate(self.cox_processes):
+            data_points = cox_process.data_points
+            for i, test_point in enumerate(test_points):
+                augmented_data_points = torch.cat(
+                    (data_points, torch.Tensor([test_point]))
+                )
+                log_numerators[i, c] = self._get_estimators(
+                    augmented_data_points, cox_process
+                )
+
+        # produce the predictions
+        raw_predictions = torch.exp(log_numerators - log_denominators_repeated)
+        normaliser = torch.sum(raw_predictions, dim=1, keepdim=True)
+        normalised_predictions = raw_predictions / normaliser
+        return normalised_predictions
+
+    def _get_estimators(
+        self,
+        points: torch.Tensor,
+        cox_process: BayesianOrthogonalSeriesCoxProcess,
+    ) -> torch.Tensor:
+        """
+        Returns the log determinant estimators for the given points;
+        to this function we pass either the data points augmented with test
+        points (numerators) or just the data points (denominators)
+        """
+        kernel_matrix = cox_process.get_kernel(points, points)
+        mean_function = cox_process._get_posterior_mean()
+        log_estimator = loop_hafnian_estimate(
+            kernel_matrix, mean_function(points), 1000
+        )
+        return log_estimator
 
 
 def loop_hafnian_estimate(
     kernel_matrix: torch.Tensor, mean_function: torch.Tensor, det_count: int
 ) -> torch.Tensor:
     """
-    Calculates the Barvinok estimator for the loop hafnian.
+    Calculates the log of the loop hafnian estimator for the k-point correlation
+    function of the Gaussian Cox process.
+
+    First, we calculate the augmented kernel matrix, which has the
+    mean function at the data (and test point) along its diagonal.
     """
-    use_random_diagonal = False
-    # first calculate the hat kernel matrix
+    # first calculate the hat kernel matrix: K + diag(m(x)) - diag(K)
+    # Note that here torch.diag(.) does different things in each line
     hat_kernel_matrix_zero_diag = kernel_matrix - torch.diag(kernel_matrix)
     hat_kernel_matrix = hat_kernel_matrix_zero_diag + torch.diag(mean_function)
 
-    # generate the skew-symmetric matrix
+    # generate the skew-symmetric matrices - these will be the random
+    # sample for the Monte Carlo determinant estimator
     gaussian_matrix = torch.einsum(
         "ijn->nij",
         (
@@ -73,28 +211,17 @@ def loop_hafnian_estimate(
             )
         ),
     )
+
+    # generate a mask to fill in the diagonals with 1s
     mask = torch.eye(kernel_matrix.shape[0]).repeat(det_count, 1, 1).bool()
     upper_triangular_matrix = torch.triu(gaussian_matrix)
     lower_triangular_matrix = torch.transpose(upper_triangular_matrix, 1, 2)
-    if use_random_diagonal:
-        random_matrix = (
-            upper_triangular_matrix - lower_triangular_matrix
-        ).masked_fill(mask, 0.0)
-        random_diagonal = torch.einsum(
-            "ijn->nij",
-            (
-                D.Normal(0.0, 1.0).sample(
-                    (kernel_matrix.shape[0], kernel_matrix.shape[0], det_count)
-                )
-            )
-            ** 2,
-        )
-        random_matrix = torch.where(mask, random_diagonal, random_matrix)
-    else:
-        random_matrix = (
-            upper_triangular_matrix - lower_triangular_matrix
-        ).masked_fill(mask, 1.0)
+    random_matrix = (
+        upper_triangular_matrix - lower_triangular_matrix
+    ).masked_fill(mask, 1.0)
 
+    # construct the final estimator as the mean of the log determinants of the
+    # generate random matrices
     estimator = torch.mean(
         torch.logdet(random_matrix * hat_kernel_matrix), dim=0
     )
@@ -107,6 +234,11 @@ if __name__ == "__main__":
     plot_intensity = False  # flag for plotting the intensity.
     plot_data = False  # flag for plotting the data
     train_eigenvalues = False
+    test_classifier = False
+    test_data_informed_classifier = False
+    test_data_informed_classifier_2d = True
+    old_way = False
+    fineness = 100
 
     # Class 1 point process
     max_time = 10.0
@@ -171,20 +303,26 @@ if __name__ == "__main__":
     ortho_basis = Basis(basis_functions, dimension, order, parameters)
 
     # model parameters
-    eigenvalue_generator = SmoothExponentialFasshauer(order)
+    # eigenvalue_generator = SmoothExponentialFasshauer(order)
     hyperparameters = GCPOSEHyperparameters(
         basis=ortho_basis, dimension=dimension
     )
-    gcp_ose_1 = OrthogonalSeriesCoxProcessParameterised(
-        hyperparameters, sigma, eigenvalue_generator
+    prior_mean = torch.tensor(0.0)
+    alpha = torch.tensor(1.5)
+    beta = torch.tensor(4.0)
+    nu = torch.tensor(0.01)
+    prior_parameters = PriorParameters(prior_mean, alpha, beta, nu)
+    gcp_ose_1 = BayesianOrthogonalSeriesCoxProcess(
+        hyperparameters, prior_parameters
     )
+    gcp_ose_2 = BayesianOrthogonalSeriesCoxProcess(
+        hyperparameters, prior_parameters
+    )
+
     gcp_ose_1.add_data(class_1_data)
-    # breakpoint()
-    posterior_mean_1 = gcp_ose_1._get_posterior_mean()
-    gcp_ose_2 = OrthogonalSeriesCoxProcessParameterised(
-        hyperparameters, sigma, eigenvalue_generator
-    )
     gcp_ose_2.add_data(class_2_data)
+
+    posterior_mean_1 = gcp_ose_1._get_posterior_mean()
     posterior_mean_2 = gcp_ose_2._get_posterior_mean()
 
     if plot_intensity:
@@ -195,80 +333,150 @@ if __name__ == "__main__":
         plt.plot(x.cpu().numpy(), intensity_2(x).cpu().numpy())
         plt.show()
 
-    # set up the eigenvalues
-    if train_eigenvalues:
-        eigenvalues_1 = gcp_ose_1.train()
-        print("############")
-        print("Eigenvalues Class 1:")
-        print(gcp_ose_1.eigenvalues)
-        print("############")
-        print("Parameters:")
-        # print(gcp_ose_1.parameters)
-        plt.plot(gcp_ose_1.eigenvalues)
+    if test_classifier:
+        test_axis = torch.linspace(0.0, max_time, fineness)
+        # prior parameters
+        prior_mean = torch.tensor(0.0)
+        alpha = torch.tensor(1.5)
+        beta = torch.tensor(4.0)
+        nu = torch.tensor(0.01)
+        prior_parameters_1 = PriorParameters(prior_mean, alpha, beta, nu)
+        prior_parameters_2 = PriorParameters(prior_mean, alpha, beta, nu)
+
+        hyperparameters_1 = GCPOSEHyperparameters(
+            basis=ortho_basis, dimension=1
+        )
+        hyperparameters_2 = GCPOSEHyperparameters(
+            basis=ortho_basis, dimension=1
+        )
+
+        classifier = GCPClassifier(
+            2,
+            [prior_parameters_1, prior_parameters_2],
+            [hyperparameters_1, hyperparameters_2],
+        )
+        # add the data
+        classifier.add_data(class_1_data, 0)
+        classifier.add_data(class_2_data, 1)
+
+        # now predict
+        class_probs = classifier.predict_point(test_axis).cpu().numpy()
+        print("ask class_probs for information about the Cox processes")
+        breakpoint()
+        plt.plot(test_axis.cpu().numpy(), class_probs[:, 0])
+        plt.plot(test_axis.cpu().numpy(), class_probs[:, 1])
         plt.show()
-        eigenvalues_2 = gcp_ose_2.train()
-        print("############")
-        print("Eigenvalues Class 2:")
-        print(gcp_ose_2.eigenvalues)
-        print("############")
-        print("Parameters:")
-        print(gcp_ose_2.parameters)
-        plt.plot(gcp_ose_2.eigenvalues)
+
+    if test_data_informed_classifier:
+        print("Beginning the data informed classifier phase!")
+        test_axis = torch.linspace(0.0, max_time, fineness)
+
+        # prior parameters
+        prior_parameters_1 = DataInformedPriorParameters(nu)
+        prior_parameters_2 = DataInformedPriorParameters(nu)
+
+        hyperparameters_1 = GCPOSEHyperparameters(
+            basis=ortho_basis, dimension=1
+        )
+        hyperparameters_2 = GCPOSEHyperparameters(
+            basis=ortho_basis, dimension=1
+        )
+
+        classifier = GCPClassifier(
+            2,
+            [prior_parameters_1, prior_parameters_2],
+            [hyperparameters_1, hyperparameters_2],
+            data_informed=True,
+        )
+
+        # add the data
+        classifier.add_data(class_1_data, 0)
+        classifier.add_data(class_2_data, 1)
+
+        # now predict
+        class_probs = classifier.predict_point(test_axis).cpu().numpy()
+        print("ask class_probs for information about the Cox processes")
+        breakpoint()
+        plt.plot(test_axis.cpu().numpy(), class_probs[:, 0])
+        plt.plot(test_axis.cpu().numpy(), class_probs[:, 1])
         plt.show()
 
-        result = input("Do you want to save the eigenvalues? (y/n)")
-        if result == "y":
-            torch.save(gcp_ose_1.eigenvalues, "eigenvalues_class_1.pt")
-            torch.save(gcp_ose_2.eigenvalues, "eigenvalues_class_2.pt")
-    else:
-        # now load the eigenvalues
-        gcp_ose_1.eigenvalues = torch.load("eigenvalues_class_1.pt").to("cuda")
-        gcp_ose_2.eigenvalues = torch.load("eigenvalues_class_2.pt").to("cuda")
+    if test_data_informed_classifier_2d:
 
-    kernel_1 = gcp_ose_1.get_kernel(class_1_data, class_1_data)
-    kernel_2 = gcp_ose_2.get_kernel(class_2_data, class_2_data)
-    plt.imshow(kernel_1.cpu())
-    plt.show()
-    plt.imshow(kernel_2.cpu())
-    plt.show()
+        def generate_points_in_square(num_points):
+            # Square dimensions
+            square_size = 1.0
 
-    fineness = 100
-    test_axis = torch.linspace(0.0, max_time, fineness)
-    estimators = torch.zeros(fineness)
-    estimators_2 = torch.zeros(fineness)
-    for i, x in enumerate(test_axis):
-        class_data_1_augmented = torch.cat((class_1_data, torch.Tensor([x])))
-        class_data_2_augmented = torch.cat((class_2_data, torch.Tensor([x])))
-        kernel_1_augmented = gcp_ose_1.get_kernel(
-            class_data_1_augmented, class_data_1_augmented
-        )
-        kernel_2_augmented = gcp_ose_2.get_kernel(
-            class_data_2_augmented, class_data_2_augmented
-        )
-        # build the kernel matrix with this augmented object
-        numerator = loop_hafnian_estimate(
-            kernel_1_augmented, posterior_mean_1(class_data_1_augmented), 1000
-        )
-        denominator = loop_hafnian_estimate(
-            kernel_1, posterior_mean_1(class_1_data), 1000
-        )
-        numerator_2 = loop_hafnian_estimate(
-            kernel_2_augmented, posterior_mean_2(class_data_2_augmented), 1000
-        )
-        denominator_2 = loop_hafnian_estimate(
-            kernel_2, posterior_mean_2(class_2_data), 1000
-        )
-        estimator = torch.exp(numerator - denominator)
-        estimator_2 = torch.exp(numerator_2 - denominator_2)
-        estimators[i] = estimator
-        estimators_2[i] = estimator_2
+            # Grid dimensions
+            grid_size = 3
+            cell_size = square_size / grid_size
 
-    plt.plot(
-        test_axis.cpu().numpy(),
-        (estimators / (estimators + estimators_2)).cpu().numpy(),
-    )
-    plt.plot(
-        test_axis.cpu().numpy(),
-        (estimators_2 / (estimators + estimators_2)).cpu().numpy(),
-    )
-    plt.show()
+            # Generate random points in the square
+            points = torch.rand((num_points, 2)) * square_size
+
+            # Determine the class of each point based on the grid
+            row_indices = (points[:, 1] // cell_size).long() % grid_size
+            col_indices = (points[:, 0] // cell_size).long() % grid_size
+            is_black_square = (row_indices + col_indices) % 2 == 0
+
+            # Assign class labels (class 1 for black, class 2 for white)
+            point_classes = torch.where(
+                is_black_square, torch.tensor(1), torch.tensor(0)
+            )
+            points_class_1 = points[point_classes == 0]
+            points_class_2 = points[point_classes == 1]
+            return points_class_1, points_class_2
+
+        # get the appropriate data
+        num_points = 550
+        class_1_data, class_2_data = generate_points_in_square(num_points)
+
+        order = 6
+        dimension = 2
+        basis_functions = [standard_chebyshev_basis] * 2
+        sigma = 2
+        max_time = 1.0
+        extra_window = 0.05
+        parameters: dict = [
+            {
+                "lower_bound": 0.0 - extra_window,
+                "upper_bound": max_time + extra_window,
+            },
+        ] * 2
+        ortho_basis = Basis(basis_functions, dimension, order, parameters)
+        print("Beginning the data informed classifier phase!")
+        test_axis = torch.linspace(0.0, max_time, fineness)
+        test_axes_x, test_axes_y = torch.meshgrid(test_axis, test_axis)
+        test_points = torch.vstack(
+            (test_axes_x.ravel(), test_axes_y.ravel())
+        ).t()
+        breakpoint()
+        # prior parameters
+        prior_parameters_1 = DataInformedPriorParameters(nu)
+        prior_parameters_2 = DataInformedPriorParameters(nu)
+
+        hyperparameters_1 = GCPOSEHyperparameters(
+            basis=ortho_basis, dimension=2
+        )
+        hyperparameters_2 = GCPOSEHyperparameters(
+            basis=ortho_basis, dimension=2
+        )
+
+        classifier = GCPClassifier(
+            2,
+            [prior_parameters_1, prior_parameters_2],
+            [hyperparameters_1, hyperparameters_2],
+            data_informed=True,
+        )
+
+        # add the data
+        classifier.add_data(class_1_data, 0)
+        classifier.add_data(class_2_data, 1)
+
+        # now predict
+        class_probs = classifier.predict_point(test_points).cpu().numpy()
+        print("ask class_probs for information about the Cox processes")
+        # breakpoint()
+        plt.plot(test_axis.cpu().numpy(), class_probs[:, 0])
+        plt.plot(test_axis.cpu().numpy(), class_probs[:, 1])
+        plt.show()
