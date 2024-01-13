@@ -78,7 +78,9 @@ class GCPClassifier:
             List[GCPOSEHyperparameters], GCPOSEHyperparameters
         ],
         data_informed: bool = False,
+        stabilising_epsilon=0.005,
     ):
+        self.stabilising_epsilon = stabilising_epsilon
         self.class_count = class_count
         self.data_informed = data_informed
         self.cox_processes = self._parse_cox_processes(
@@ -164,7 +166,10 @@ class GCPClassifier:
 
         # produce the predictions
         raw_predictions = torch.exp(log_numerators - log_denominators_repeated)
-        normaliser = torch.sum(raw_predictions, dim=1, keepdim=True)
+        normaliser = (
+            torch.sum(raw_predictions, dim=1, keepdim=True)
+            + self.stabilising_epsilon
+        )
         normalised_predictions = raw_predictions / normaliser
         return normalised_predictions
 
