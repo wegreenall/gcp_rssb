@@ -6,6 +6,11 @@ from gcp_rssb.methods.gcp_ose import (
     GCPOSEHyperparameters,
     Mapping,
 )
+from gcp_rssb.methods.gcp_ose_bayesian import (
+    BayesianOrthogonalSeriesCoxProcessObservationNoise,
+    PriorParameters,
+    DataInformedPriorParameters,
+)
 from ortho.basis_functions import Basis, standard_chebyshev_basis
 
 
@@ -73,6 +78,29 @@ class TestGcpOse(unittest.TestCase):
         self.gcp_ose.train()
         self.assertTrue(self.gcp_ose.trained)
         self.assertTrue(self.gcp_ose.eigenvalues is not None)
+
+
+class TestBayesianOrthogonalSeriesCoxProcessObservationNoise(
+    unittest.TestCase
+):
+    def setUp(self):
+        self.sample_size = 50
+
+        # set up the basis
+        params = [{"lower_bound": 0, "upper_bound": 1}]
+        ortho_basis = Basis(standard_chebyshev_basis, 1, 10, params)
+
+        # set up the model
+        gcp_ose_hyperparams = GCPOSEHyperparameters(
+            basis=ortho_basis, dimension=1)
+        prior_parameters = DataInformedPriorParameters(nu=0.12)
+        self.osegcp = BayesianOrthogonalSeriesCoxProcessObservationNoise(gcp_ose_hyperparams, prior_parameters=)
+
+        # add the data
+        self.osegcp.add_data(my_data)
+
+    def test_get_intensity_sample(self):
+        intensity_function = self.osegcp._get_intensity_sample()
 
 
 class TestMapping(unittest.TestCase):

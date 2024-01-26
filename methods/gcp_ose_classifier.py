@@ -23,7 +23,7 @@ from typing import Union, List
 torch.set_default_dtype(torch.float64)
 
 # set to cuda
-torch.set_default_tensor_type(torch.cuda.DoubleTensor)
+# torch.set_default_tensor_type(torch.cuda.DoubleTensor)
 # torch.set_default_device("cuda")
 from termcolor import colored
 
@@ -83,6 +83,14 @@ class GCPClassifier:
         self.stabilising_epsilon = stabilising_epsilon
         self.class_count = class_count
         self.data_informed = data_informed
+        if (
+            isinstance(parameters, DataInformedPriorParameters)
+            and not data_informed
+        ):
+            raise ValueError(
+                "You passed a DataInformedPriorParameters object as the\
+                    parameter, but didn't set data_informed to True."
+            )
         self.cox_processes = self._parse_cox_processes(
             parameters, hyperparameters
         )
@@ -103,9 +111,10 @@ class GCPClassifier:
         else:
             cox_process_type = BayesianOrthogonalSeriesCoxProcess
 
-        case_1 = isinstance(parameter, PriorParameters) and isinstance(
-            hyperparameters, GCPOSEHyperparameters
-        )
+        case_1 = (
+            isinstance(parameter, PriorParameters)
+            or isinstance(parameter, DataInformedPriorParameters)
+        ) and isinstance(hyperparameters, GCPOSEHyperparameters)
         case_2 = isinstance(parameter, list) and isinstance(
             hyperparameters, list
         )
@@ -143,6 +152,7 @@ class GCPClassifier:
         log_numerators = torch.zeros(test_points.shape[0], self.class_count)
         log_denominators = torch.zeros(1, self.class_count)
 
+        #        print("About the start the denominators loop inside predict_point")
         # denominators
         for i, cox_process in enumerate(self.cox_processes):
             data_points = cox_process.data_points
@@ -153,12 +163,13 @@ class GCPClassifier:
             test_points.shape[0], 1
         )
 
+        # print("About the start the loop inside predict_point")
         # numerators
         for c, cox_process in enumerate(self.cox_processes):
             data_points = cox_process.data_points
             for i, test_point in enumerate(test_points):
                 augmented_data_points = torch.cat(
-                    (data_points, torch.Tensor([test_point]))
+                    (data_points, test_point.unsqueeze(0))
                 )
                 log_numerators[i, c] = self._get_estimators(
                     augmented_data_points, cox_process
@@ -185,9 +196,14 @@ class GCPClassifier:
         """
         kernel_matrix = cox_process.get_kernel(points, points)
         mean_function = cox_process._get_posterior_mean()
-        log_estimator = loop_hafnian_estimate(
-            kernel_matrix, mean_function(points), 1000
+        print(
+            "About to get the log_estimators using loop_hafnian_estimate on line 202"
         )
+        log_estimator = loop_hafnian_estimate(
+            kernel_matrix, mean_function(points), 2000
+        )
+        print(colored("Finished getting the log_estimators once", "blue"))
+        torch.cuda.empty_cache()
         return log_estimator
 
 
@@ -227,21 +243,142 @@ def loop_hafnian_estimate(
 
     # construct the final estimator as the mean of the log determinants of the
     # generate random matrices
-    estimator = torch.mean(
-        torch.logdet(random_matrix * hat_kernel_matrix), dim=0
-    )
+    determinables = random_matrix * hat_kernel_matrix
+    # print(colored("About to move to gpu!", "blue"))
+    cuda_determinables = determinables.cuda()
+    logdets = torch.logdet(cuda_determinables).to("cpu")
+    # print(colored("Just got our stuff back from the GPU!", "red"))
+    torch.cuda.empty_cache()
+    estimator = torch.mean(logdets, dim=0)
     estimator = torch.nan_to_num(estimator, nan=0.0)
     return estimator
 
 
+def loop_hafnian_WSM(
+    design_matrix: torch.Tensor,
+    kernel_matrix: torch.Tensor,
+    eigenvalues: torch.Tensor,
+    mean_function: torch.Tensor,
+    det_count: int,
+) -> torch.Tensor:
+    # step one: check that the loop hafnian thing works correctly.
+    # first calculate the hat kernel matrix: K + diag(m(x)) - diag(K)
+    # Note that here torch.diag(.) does different things in each line
+    hat_kernel_matrix_zero_diag = kernel_matrix - torch.diag(kernel_matrix)
+    hat_kernel_matrix = hat_kernel_matrix_zero_diag + torch.diag(mean_function)
+    """
+    In the WSM determinant formula, the result is:
+
+        det(A + ΦWΦ') = det(A) * det(W) * det(W^{-1} + Φ'A^{-1}Φ)
+    """
+    K = kernel_matrix  # ΦWΦ'
+    A = torch.diag(mean_function) - torch.diag(kernel_matrix)  # A
+    W = torch.diag(eigenvalues)  # W
+    # print(K.shape)
+    # print(A.shape)
+    # print(W.shape)
+    LHS_matrix = A + K
+    LHS = torch.linalg.det(LHS_matrix)
+    RHS_matrix = (
+        torch.inverse(W) + design_matrix.t() @ torch.inverse(A) @ design_matrix
+    )
+    RHS = (
+        torch.linalg.det(A)
+        * torch.linalg.det(W)
+        * torch.linalg.det(RHS_matrix)
+    )
+
+    # generate the skew-symmetric matrices - these will be the random
+    # sample for the Monte Carlo determinant estimator
+    gaussian_matrix_LHS = torch.einsum(
+        "ijn->nij",
+        (
+            D.Normal(0.0, 1.0).sample(
+                (LHS_matrix.shape[0], LHS_matrix.shape[0], det_count)
+            )
+        ),
+    )
+    gaussian_matrix_RHS = torch.einsum(
+        "ijn->nij",
+        (
+            D.Normal(0.0, 1.0).sample(
+                (RHS_matrix.shape[0], RHS_matrix.shape[0], det_count)
+            )
+        ),
+    )
+
+    # generate a mask to fill in the diagonals with 1s # LHS
+    mask_LHS = torch.eye(LHS_matrix.shape[0]).repeat(det_count, 1, 1).bool()
+    upper_triangular_matrix_LHS = torch.triu(gaussian_matrix_LHS)
+    lower_triangular_matrix_LHS = torch.transpose(
+        upper_triangular_matrix_LHS, 1, 2
+    )
+
+    # generate a mask to fill in the diagonals with 1s # LHS
+    mask_RHS = torch.eye(RHS_matrix.shape[0]).repeat(det_count, 1, 1).bool()
+    upper_triangular_matrix_RHS = torch.triu(gaussian_matrix_RHS)
+    lower_triangular_matrix_RHS = torch.transpose(
+        upper_triangular_matrix_RHS, 1, 2
+    )
+
+    #
+    random_matrix_LHS = (
+        upper_triangular_matrix_LHS - lower_triangular_matrix_LHS
+    ).masked_fill(mask_LHS, 1.0)
+    random_matrix_RHS = (
+        upper_triangular_matrix_RHS - lower_triangular_matrix_RHS
+    ).masked_fill(mask_RHS, 1.0)
+
+    # construct the final estimator as the mean of the log determinants of the
+    # generate random matrices
+    determinables_LHS = random_matrix_LHS * LHS_matrix
+    determinables_RHS = random_matrix_RHS * RHS_matrix
+    logdets_LHS = torch.logdet(determinables_LHS)
+    logdets_RHS = (
+        torch.logdet(determinables_RHS) + torch.logdet(A) + torch.logdet(W)
+    )
+    print("LHS:")
+    breakpoint()
+    print(torch.mean(logdets_LHS, dim=0))
+    print("RHS:")
+    print(torch.mean(logdets_RHS, dim=0))
+    breakpoint()
+
+
 if __name__ == "__main__":
+
+    def generate_points_in_square(num_points):
+        # Square dimensions
+        square_size = 1.0
+
+        # Grid dimensions
+        grid_size = 3
+        cell_size = square_size / grid_size
+
+        # Generate random points in the square
+        points = torch.rand((num_points, 2)) * square_size
+
+        # Determine the class of each point based on the grid
+        row_indices = (points[:, 1] // cell_size).long() % grid_size
+        col_indices = (points[:, 0] // cell_size).long() % grid_size
+        is_black_square = (row_indices + col_indices) % 2 == 0
+
+        # Assign class labels (class 1 for black, class 2 for white)
+        point_classes = torch.where(
+            is_black_square, torch.tensor(1), torch.tensor(0)
+        )
+        points_class_1 = points[point_classes == 0]
+        points_class_2 = points[point_classes == 1]
+        return points_class_1, points_class_2
+
     print("Starting the program!")
     plot_intensity = False  # flag for plotting the intensity.
     plot_data = False  # flag for plotting the data
     train_eigenvalues = False
     test_classifier = False
     test_data_informed_classifier = False
-    test_data_informed_classifier_2d = True
+    test_data_informed_classifier_2d = False
+    test_loop_hafnian_wsm = True
     old_way = False
     fineness = 100
 
@@ -407,39 +544,16 @@ if __name__ == "__main__":
         plt.show()
 
     if test_data_informed_classifier_2d:
+        train_class_probs = True
 
-        def generate_points_in_square(num_points):
-            # Square dimensions
-            square_size = 1.0
-
-            # Grid dimensions
-            grid_size = 3
-            cell_size = square_size / grid_size
-
-            # Generate random points in the square
-            points = torch.rand((num_points, 2)) * square_size
-
-            # Determine the class of each point based on the grid
-            row_indices = (points[:, 1] // cell_size).long() % grid_size
-            col_indices = (points[:, 0] // cell_size).long() % grid_size
-            is_black_square = (row_indices + col_indices) % 2 == 0
-
-            # Assign class labels (class 1 for black, class 2 for white)
-            point_classes = torch.where(
-                is_black_square, torch.tensor(1), torch.tensor(0)
-            )
-            points_class_1 = points[point_classes == 0]
-            points_class_2 = points[point_classes == 1]
-            return points_class_1, points_class_2
-
+        fineness = 300
         # get the appropriate data
-        num_points = 550
+        num_points = 150
         class_1_data, class_2_data = generate_points_in_square(num_points)
 
-        order = 6
+        order = 16
         dimension = 2
         basis_functions = [standard_chebyshev_basis] * 2
-        sigma = 2
         max_time = 1.0
         extra_window = 0.05
         parameters: dict = [
@@ -455,7 +569,7 @@ if __name__ == "__main__":
         test_points = torch.vstack(
             (test_axes_x.ravel(), test_axes_y.ravel())
         ).t()
-        breakpoint()
+
         # prior parameters
         prior_parameters_1 = DataInformedPriorParameters(nu)
         prior_parameters_2 = DataInformedPriorParameters(nu)
@@ -479,9 +593,83 @@ if __name__ == "__main__":
         classifier.add_data(class_2_data, 1)
 
         # now predict
-        class_probs = classifier.predict_point(test_points).cpu().numpy()
+        if train_class_probs:
+            class_probs = classifier.predict_point(test_points).cpu().numpy()
+            # save the class probs so it is not so slow each time
+            torch.save(class_probs, "class_probs.pt")
+        else:
+            class_probs = torch.load("class_probs.pt")
+
         print("ask class_probs for information about the Cox processes")
         # breakpoint()
-        plt.plot(test_axis.cpu().numpy(), class_probs[:, 0])
-        plt.plot(test_axis.cpu().numpy(), class_probs[:, 1])
+        plt.contourf(
+            test_axes_x.cpu().numpy(),
+            test_axes_y.cpu().numpy(),
+            class_probs[:, 0].reshape(test_axes_x.shape),
+        )
         plt.show()
+
+    if test_loop_hafnian_wsm:
+        fineness = 300
+        # get the appropriate data
+        num_points = 150
+        class_1_data, class_2_data = generate_points_in_square(num_points)
+
+        order = 10
+        dimension = 2
+        basis_functions = [standard_chebyshev_basis] * 2
+        max_time = 1.0
+        extra_window = 0.05
+        parameters: dict = [
+            {
+                "lower_bound": 0.0 - extra_window,
+                "upper_bound": max_time + extra_window,
+            },
+        ] * 2
+        ortho_basis = Basis(basis_functions, dimension, order, parameters)
+        print("Beginning the data informed classifier phase!")
+        test_axis = torch.linspace(0.0, max_time, fineness)
+        test_axes_x, test_axes_y = torch.meshgrid(test_axis, test_axis)
+        test_points = torch.vstack(
+            (test_axes_x.ravel(), test_axes_y.ravel())
+        ).t()
+
+        # prior parameters
+        prior_parameters_1 = DataInformedPriorParameters(nu)
+        prior_parameters_2 = DataInformedPriorParameters(nu)
+
+        hyperparameters_1 = GCPOSEHyperparameters(
+            basis=ortho_basis, dimension=2
+        )
+        hyperparameters_2 = GCPOSEHyperparameters(
+            basis=ortho_basis, dimension=2
+        )
+
+        classifier = GCPClassifier(
+            2,
+            [prior_parameters_1, prior_parameters_2],
+            [hyperparameters_1, hyperparameters_2],
+            data_informed=True,
+        )
+
+        # add the data
+        classifier.add_data(class_1_data, 0)
+        classifier.add_data(class_2_data, 1)
+        relevant_cox_process = classifier.cox_processes[0]
+        kernel_matrix = relevant_cox_process.get_kernel(
+            relevant_cox_process.data_points, relevant_cox_process.data_points
+        )
+        eigenvalues = classifier.cox_processes[0].eigenvalues
+        mean_function = classifier.cox_processes[0]._get_posterior_mean()
+
+        # make it for class one
+        # breakpoint()
+        design_matrix = ortho_basis(relevant_cox_process.data_points)
+        # print(design_matrix.shape)
+        loop_hafnian_WSM = loop_hafnian_WSM(
+            design_matrix,
+            kernel_matrix,
+            eigenvalues,
+            mean_function(class_1_data),
+            det_count=5000,
+        )

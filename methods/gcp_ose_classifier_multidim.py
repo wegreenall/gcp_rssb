@@ -1,5 +1,4 @@
-f
-om gcp_rssb.data import PoissonProcess
+from gcp_rssb.data import PoissonProcess
 from gcp_rssb.methods.gcp_ose import (
     OrthogonalSeriesCoxProcessParameterised,
     GCPOSEHyperparameters,

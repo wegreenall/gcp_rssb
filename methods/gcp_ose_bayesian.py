@@ -12,7 +12,7 @@ from mercergp.eigenvalue_gen import (
 from dataclasses import dataclass
 from typing import Callable
 
-from gcp_rssb.data import PoissonProcess
+from gcp_rssb.data import PoissonProcess, PoissonProcess2d
 from ortho.basis_functions import (
     Basis,
     standard_chebyshev_basis,
@@ -27,6 +27,7 @@ from gcp_rssb.methods.gcp_ose import (
     OrthogonalSeriesCoxProcess,
     GCPOSEHyperparameters,
 )
+import time
 
 # from gcp_ose_bayesian import BayesianOrthogonalSeriesCoxProcess
 # from gcp_rssb.methods.gcp_ose_classifier import loop_hafnian_estimate
@@ -42,7 +43,11 @@ class PriorParameters:
 
 @dataclass
 class DataInformedPriorParameters:
-    nu: torch.Tensor
+    def __init__(self, nu: torch.Tensor):
+        self.alpha = torch.tensor(1.5)
+        self.beta = torch.tensor(0.0)
+        self.mu = torch.tensor(0.0)
+        self.nu = nu
 
 
 class BayesianOrthogonalSeriesCoxProcess(OrthogonalSeriesCoxProcess):
@@ -59,7 +64,7 @@ class BayesianOrthogonalSeriesCoxProcess(OrthogonalSeriesCoxProcess):
         self.hyperparameters = gcp_ose_hyperparameters
         self.prior_parameters = prior_parameters
 
-    def add_data(self, data_points: torch.Tensor):
+    def add_data(self, data_points: torch.Tensor, domain: torch.Tensor = None):
         """
         Adds the data to the model.
 
@@ -72,6 +77,8 @@ class BayesianOrthogonalSeriesCoxProcess(OrthogonalSeriesCoxProcess):
             - sets up the Mapping, for which the data points are a prerequisite
         """
         self.data_points = data_points
+        if domain is not None:
+            self.domain = domain
         self.ose_coeffics = self._get_ose_coeffics()
 
         # get the eigenvalues and mean estimates as posterior mean
@@ -84,6 +91,7 @@ class BayesianOrthogonalSeriesCoxProcess(OrthogonalSeriesCoxProcess):
 
     def _get_posterior_mean_coefficients(self):
         """ """
+        print(self.ose_coeffics)
         return self.ose_coeffics / (self.prior_parameters.nu + 1)
 
     def _get_posterior_eigenvalue_estimates(self):
@@ -112,6 +120,47 @@ class BayesianOrthogonalSeriesCoxProcess(OrthogonalSeriesCoxProcess):
             self.hyperparameters.basis, self.posterior_mean_coefficients
         )
 
+    def get_posterior_predictive_sample(self):
+        """
+        Returns a tensor of size (n_points, n_dim) where n_points is a Poisson distributed random variable.
+        """
+        # step 1: generate a sample intensity function
+        intensity_sample = self._get_intensity_sample()
+        # breakpoint()
+
+        # step 2: generate a sample of the Poisson process
+        dimension = self.domain.shape[0]
+        if dimension == 1:
+            x_axis = torch.linspace(
+                self.domain[0][0] - 0.1, self.domain[0][1] + 0.1, 1000
+            )
+            bound = torch.max(intensity_sample(x_axis))
+            poisson_process = PoissonProcess(
+                intensity_sample, self.domain[0][1], bound
+            )
+        else:
+            poisson_process = PoissonProcess2d(
+                intensity_sample,
+                domain=self.domain,
+            )
+        poisson_process.simulate()
+        return poisson_process.get_data()
+
+    def _get_intensity_sample(self):
+        """
+        Returns a sample from the posterior distribution of the intensity function.
+        """
+        mean_coeffics = self.posterior_mean_coefficients
+        eigenvalue_std = torch.sqrt(self.eigenvalues)
+        random_component = torch.randn_like(self.eigenvalues)
+        random_coeffics = eigenvalue_std * random_component
+        intensity_sample = HilbertSpaceElement(
+            self.hyperparameters.basis, mean_coeffics + random_coeffics
+        )
+        if torch.any(random_coeffics != random_coeffics):
+            breakpoint()
+        return intensity_sample
+
 
 class BayesianOrthogonalSeriesCoxProcessObservationNoise(
     BayesianOrthogonalSeriesCoxProcess
@@ -134,12 +183,22 @@ class BayesianOrthogonalSeriesCoxProcessObservationNoise(
         Adds the data to the model.
         """
         self.data_points = data_points
+        if domain is not None:
+            self.domain = domain
+
+        start_value = time.perf_counter()
         self.ose_coeffics = self._get_ose_coeffics()
         self.ose_square_coeffics = self._get_ose_square_coeffics()
 
         # get the eigenvalues and mean estimates as posterior mean
         self.posterior_mean_coefficients = (
             self._get_posterior_mean_coefficients()
+        )
+        end_value = time.perf_counter()
+        print(
+            "Time taken to get estimates data: {}".format(
+                end_value - start_value
+            )
         )
         self.eigenvalues = self._get_posterior_eigenvalue_estimates()
 
@@ -171,6 +230,41 @@ class BayesianOrthogonalSeriesCoxProcessObservationNoise(
         design_matrix = basis(self.data_points) ** 2
         coeffics = torch.sum(design_matrix, dim=0)
         return coeffics
+
+    def get_posterior_predictive_sample(self):
+        """
+        Returns a tensor of size (n_points, n_dim) where n_points is a Poisson distributed random variable.
+        """
+        # step 1: generate a sample intensity function
+        intensity_sample = self._get_intensity_sample()
+
+        # step 2: generate a sample of the Poisson process
+        x_axis = torch.linspace(
+            self.domain[0][0] - 0.1, self.domain[0][1] + 0.1, 1000
+        )
+        bound = torch.max(intensity_sample(x_axis))
+        poisson_process = PoissonProcess(
+            intensity_sample, self.domain[0][1], bound
+        )
+        poisson_process.simulate()
+        return poisson_process.get_data()
+
+    def _get_intensity_sample(self):
+        """
+        Returns a sample from the posterior distribution of the intensity function.
+        """
+        mean_coeffics = self.posterior_mean_coefficients
+        breakpoint()
+        eigenvalue_std = torch.sqrt(self.eigenvalues)
+        random_component = torch.randn_like(self.eigenvalues)
+        random_coeffics = eigenvalue_std * random_component
+        breakpoint()
+        intensity_sample = HilbertSpaceElement(
+            self.hyperparameters.basis, mean_coeffics + random_coeffics
+        )
+        if torch.any(random_coeffics != random_coeffics):
+            breakpoint()
+        return intensity_sample
 
 
 class DataInformedBayesOSECP(BayesianOrthogonalSeriesCoxProcess):
