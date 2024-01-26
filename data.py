@@ -1,8 +1,11 @@
 import torch
+import torch.distributions as D
 from enum import Enum
 from abc import ABCMeta, abstractmethod
 from torchmin import minimize_constr, minimize
 from dataclasses import dataclass
+import matplotlib.pyplot as plt
+import math
 
 
 class PoissonProcess:
@@ -14,15 +17,15 @@ class PoissonProcess:
     def __init__(
         self,
         intensity: callable,
-        max_time: torch.float,
         bound: torch.float = 0.0,
         dimension: int = 1,
+        domain: torch.Tensor = None,
     ):
         self._data = None
         self.intensity = intensity
         self.bound = bound
-        self.max_time = max_time
         self.dimension = dimension
+        self.domain = domain
 
     def simulate(self) -> None:
         """
@@ -32,8 +35,8 @@ class PoissonProcess:
         """
         # calculate maximiser
         init_point = torch.ones(self.dimension)
-        bound_top = torch.Tensor([self.max_time] * self.dimension)
-        bound_bottom = torch.Tensor([0.0] * self.dimension)
+        bound_top = self.domain[:, 1]
+        bound_bottom = self.domain[:, 0]
         if self.bound == 0.0:
             negative_intensity = lambda t: -self.intensity(t)
             result = minimize_constr(
@@ -44,13 +47,16 @@ class PoissonProcess:
             self.bound = -result.fun
 
         # get sample point count
-        rate_volume = (self.max_time * self.bound) ** self.dimension
+        rate_volume = (
+            torch.prod(self.domain[:, 1] - self.domain[:, 0]) * self.bound
+        )  # this should be right...
         poisson_dist = torch.distributions.Poisson(rate=rate_volume)
         num_of_points = int(poisson_dist.sample())
 
         if num_of_points == 0:
             print("No points generated!")
-            print("self.max_time:", self.max_time)
+            print("rate volume:", rate_volume)
+            # print("self.max_time:", self.max_time)
 
         # set up the ranges for the dimensions
         # generate the homogeneous samples, ready for thinning
@@ -59,6 +65,7 @@ class PoissonProcess:
             .sample(torch.Size([num_of_points]))
             .squeeze()
         )
+        breakpoint()
 
         # thin the homogeneous samples to get the inhomogeneous values
         inhomo_samples = self._reject(homo_samples)
@@ -106,3 +113,30 @@ class Metric(ABCMeta):
         self, predicted: torch.Tensor, actual: torch.Tensor
     ) -> torch.Tensor:
         pass
+
+
+if __name__ == "__main__":
+    bounds = torch.Tensor([[0.0, 1.0], [2.0, 3.0]])
+    sample_size = 1000
+    unif = D.Uniform(bounds[:, 0], bounds[:, 1])
+    sample = unif.sample((sample_size,))
+    # plt.scatter(sample[:, 0], sample[:, 1])
+    # plt.show()
+
+    # test the poisson process stuff
+    def intensity(input_points: torch.Tensor):
+        return 100 * torch.exp(
+            D.MultivariateNormal(
+                torch.Tensor([0.0, 0.0]),
+                torch.Tensor([[1.0, 0.9], [0.9, 1.0]]),
+            ).log_prob(input_points)
+        )
+
+    bound = 1000 / math.sqrt(math.pi * 2)
+    dimension = 2
+    domain = torch.Tensor([[-1, 1], [-1, 1]])
+    pp = PoissonProcess(intensity, bound, dimension, domain)
+    pp.simulate()
+    data = pp.get_data()
+    plt.scatter(data[:, 0], data[:, 1])
+    plt.show()
