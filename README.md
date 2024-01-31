@@ -3,9 +3,9 @@ to ICML 2024.
 
 It is based in PyTorch as its backend library. It also requires
 
-` pandas;`
-` matplotlib `
-` 
+`pandas`\
+`matplotlib`\
+
 
 This code depends on our proprietary libraries, `ortho` and `mercergp`, 
 libraries for handling orthonormal bases and sparse Gaussian processes
