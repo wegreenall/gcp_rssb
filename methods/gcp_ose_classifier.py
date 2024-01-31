@@ -26,6 +26,7 @@ torch.set_default_dtype(torch.float64)
 # torch.set_default_tensor_type(torch.cuda.DoubleTensor)
 # torch.set_default_device("cuda")
 from termcolor import colored
+import gc
 
 
 class GCPClassifier:
@@ -78,7 +79,7 @@ class GCPClassifier:
             List[GCPOSEHyperparameters], GCPOSEHyperparameters
         ],
         data_informed: bool = False,
-        stabilising_epsilon=0.005,
+        stabilising_epsilon=0.001,
     ):
         self.stabilising_epsilon = stabilising_epsilon
         self.class_count = class_count
@@ -142,7 +143,9 @@ class GCPClassifier:
         """
         self.cox_processes[class_index].add_data(data)
 
-    def predict_point(self, test_points: torch.Tensor) -> torch.Tensor:
+    def predict_point(
+        self, test_points: torch.Tensor, det_count=1000
+    ) -> torch.Tensor:
         """
         Outputs class probabilities for a set of test points.
 
@@ -152,7 +155,6 @@ class GCPClassifier:
         log_numerators = torch.zeros(test_points.shape[0], self.class_count)
         log_denominators = torch.zeros(1, self.class_count)
 
-        #        print("About the start the denominators loop inside predict_point")
         # denominators
         for i, cox_process in enumerate(self.cox_processes):
             data_points = cox_process.data_points
@@ -163,11 +165,12 @@ class GCPClassifier:
             test_points.shape[0], 1
         )
 
-        # print("About the start the loop inside predict_point")
         # numerators
         for c, cox_process in enumerate(self.cox_processes):
             data_points = cox_process.data_points
             for i, test_point in enumerate(test_points):
+                # progress bar
+                print("test_point:", i, "out of ", test_points.shape[0])
                 augmented_data_points = torch.cat(
                     (data_points, test_point.unsqueeze(0))
                 )
@@ -188,6 +191,7 @@ class GCPClassifier:
         self,
         points: torch.Tensor,
         cox_process: BayesianOrthogonalSeriesCoxProcess,
+        det_count=1000,
     ) -> torch.Tensor:
         """
         Returns the log determinant estimators for the given points;
@@ -195,16 +199,12 @@ class GCPClassifier:
         points (numerators) or just the data points (denominators)
         """
         kernel_matrix = cox_process.get_kernel(points, points)
-        mean_function = cox_process._get_posterior_mean()
-        print(
-            "About to get the log_estimators using loop_hafnian_estimate on line 202"
-        )
+        mean_function = cox_process._get_posterior_mean()(points)
         log_estimator = loop_hafnian_estimate(
-            kernel_matrix, mean_function(points), 2000
+            kernel_matrix, mean_function, det_count
         )
-        print(colored("Finished getting the log_estimators once", "blue"))
-        torch.cuda.empty_cache()
-        return log_estimator
+
+        return log_estimator.detach()
 
 
 def loop_hafnian_estimate(
@@ -217,24 +217,26 @@ def loop_hafnian_estimate(
     First, we calculate the augmented kernel matrix, which has the
     mean function at the data (and test point) along its diagonal.
     """
-    # first calculate the hat kernel matrix: K + diag(m(x)) - diag(K)
-    # Note that here torch.diag(.) does different things in each line
+    i = 0
     hat_kernel_matrix_zero_diag = kernel_matrix - torch.diag(kernel_matrix)
+    i += 1  # i = 1
     hat_kernel_matrix = hat_kernel_matrix_zero_diag + torch.diag(mean_function)
-
+    i += 1  # i = 2
     # generate the skew-symmetric matrices - these will be the random
     # sample for the Monte Carlo determinant estimator
+    gaussian_sample = D.Normal(0.0, 1.0).sample(
+        (kernel_matrix.shape[0], kernel_matrix.shape[0], det_count)
+    )
+    i += 1  # i = 3
     gaussian_matrix = torch.einsum(
         "ijn->nij",
-        (
-            D.Normal(0.0, 1.0).sample(
-                (kernel_matrix.shape[0], kernel_matrix.shape[0], det_count)
-            )
-        ),
+        gaussian_sample,
     )
 
+    i += 1  # i = 4
     # generate a mask to fill in the diagonals with 1s
     mask = torch.eye(kernel_matrix.shape[0]).repeat(det_count, 1, 1).bool()
+
     upper_triangular_matrix = torch.triu(gaussian_matrix)
     lower_triangular_matrix = torch.transpose(upper_triangular_matrix, 1, 2)
     random_matrix = (
@@ -244,12 +246,24 @@ def loop_hafnian_estimate(
     # construct the final estimator as the mean of the log determinants of the
     # generate random matrices
     determinables = random_matrix * hat_kernel_matrix
-    # print(colored("About to move to gpu!", "blue"))
-    cuda_determinables = determinables.cuda()
-    logdets = torch.logdet(cuda_determinables).to("cpu")
-    # print(colored("Just got our stuff back from the GPU!", "red"))
-    torch.cuda.empty_cache()
-    estimator = torch.mean(logdets, dim=0)
+    logdets = torch.logdet(determinables)
+    logdets_cpu = logdets.cpu()
+    # del kernel_matrix
+    # del hat_kernel_matrix_zero_diag
+    # del mask
+    # del upper_triangular_matrix
+    # del lower_triangular_matrix
+    # del determinables
+    # del random_matrix
+    # del hat_kernel_matrix
+    # del gaussian_matrix
+    # del gaussian_sample
+    # del logdets
+
+    # gc.collect()
+    # torch.cuda.empty_cache()
+    # torch.cuda.reset_max_memory_allocated()
+    estimator = torch.mean(logdets_cpu, dim=0)
     estimator = torch.nan_to_num(estimator, nan=0.0)
     return estimator
 

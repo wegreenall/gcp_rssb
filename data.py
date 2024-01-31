@@ -149,9 +149,8 @@ class PoissonProcess:
                 bounds=dict(lb=bound_bottom, ub=bound_top),
             )
             self.bound = -result.fun
-        else:
-            print("WHOO HOO!")
-            print("bound:", self.bound)
+        # else:
+        # print("bound:", self.bound)
 
         # get sample point count
         rate_volume = (self.max_time * self.bound) ** self.dimension

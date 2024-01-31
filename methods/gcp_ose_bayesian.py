@@ -79,6 +79,7 @@ class BayesianOrthogonalSeriesCoxProcess(OrthogonalSeriesCoxProcess):
         self.data_points = data_points
         if domain is not None:
             self.domain = domain
+        start_value = time.perf_counter()
         self.ose_coeffics = self._get_ose_coeffics()
 
         # get the eigenvalues and mean estimates as posterior mean
@@ -88,6 +89,12 @@ class BayesianOrthogonalSeriesCoxProcess(OrthogonalSeriesCoxProcess):
         self.eigenvalues = self._get_posterior_eigenvalue_estimates()
 
         self.posterior_mean = self._get_posterior_mean()
+        end_value = time.perf_counter()
+        print(
+            "Time taken to get estimates data: {}".format(
+                end_value - start_value
+            )
+        )
 
     def _get_posterior_mean_coefficients(self):
         """ """
@@ -254,11 +261,9 @@ class BayesianOrthogonalSeriesCoxProcessObservationNoise(
         Returns a sample from the posterior distribution of the intensity function.
         """
         mean_coeffics = self.posterior_mean_coefficients
-        breakpoint()
         eigenvalue_std = torch.sqrt(self.eigenvalues)
         random_component = torch.randn_like(self.eigenvalues)
         random_coeffics = eigenvalue_std * random_component
-        breakpoint()
         intensity_sample = HilbertSpaceElement(
             self.hyperparameters.basis, mean_coeffics + random_coeffics
         )
