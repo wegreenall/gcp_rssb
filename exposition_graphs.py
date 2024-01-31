@@ -8,7 +8,6 @@ from gcp_rssb.methods.gcp_ose import GCPOSEHyperparameters
 
 from ortho.basis_functions import Basis, standard_chebyshev_basis
 from typing import List
-from termcolor import colored
 
 
 def gaussian_kernel(x, y):
@@ -62,7 +61,9 @@ def run_exposition_graphs(save):
     plot_name = "semipositive_gaussian_cox_process"
     figure_name = "semipositive_gaussian_cox_process"
     plots = [ExpositionPlot(plot_name)]
-    figure = ExpositionFigure(plots, Section.GAUSSIAN_COX_PROCESSES, figure_name)
+    figure = ExpositionFigure(
+        plots, Section.GAUSSIAN_COX_PROCESSES, figure_name
+    )
     figure.run_figure(save=save)
 
 

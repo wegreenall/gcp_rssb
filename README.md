@@ -1,6 +1,12 @@
 Code for the paper "Orthogonal Series Gaussian Cox Processes" as submitted
 to ICML 2024.
 
+It is based in PyTorch as its backend library. It also requires
+
+` pandas;`
+` matplotlib `
+` 
+
 This code depends on our proprietary libraries, `ortho` and `mercergp`, 
 libraries for handling orthonormal bases and sparse Gaussian processes
 respectively. Anonymised links to both of these are provided in the 
@@ -22,4 +28,5 @@ samples, see `data.py`
     - `classification_diagrams.py`
     - `classification_diagrams_2d.py`
     - `experiment_graphs.py`
+
 which depend on classes found in `plot.py` for standardising plot behaviour.

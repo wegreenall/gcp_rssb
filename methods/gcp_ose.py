@@ -21,7 +21,6 @@ from ortho.basis_functions import (
 )
 
 import matplotlib.pyplot as plt
-from termcolor import colored
 
 
 @dataclass
@@ -216,7 +215,7 @@ class OrthogonalSeriesCoxProcessParameterised(OrthogonalSeriesCoxProcess):
                 counter += 1
                 if counter % 100 == 0:
                     print("Iteration:", counter)
-                print(colored("New iteration...", "green"))
+                print("New iteration...")
                 print(torch.norm(new_guess - previous_guess))
                 previous_guess = new_guess
                 previous_parameters = new_parameters

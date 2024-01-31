@@ -17,7 +17,6 @@ from ortho.basis_functions import Basis, standard_chebyshev_basis
 from typing import List
 
 torch.manual_seed(3)
-from termcolor import colored
 import time
 
 
@@ -42,7 +41,9 @@ class SynthPlot(Plot):
             basis=chebyshev_basis,
             dimension=dim,
         )
-        prior_parameters = PriorParameters(mean=0.0, alpha=1.5, beta=2.0, nu=0.12)
+        prior_parameters = PriorParameters(
+            mean=0.0, alpha=1.5, beta=2.0, nu=0.12
+        )
         gcp_ose_model = BayesianOrthogonalSeriesCoxProcessObservationNoise(
             gcp_ose_hyperparameters, prior_parameters
         )
@@ -74,7 +75,9 @@ class SynthPlot(Plot):
         print("Time taken to add data: {}".format(end_value - start_value))
 
         # get the various stuff
-        eigenvalues = gcp_ose_model._get_posterior_eigenvalue_estimates().cpu().numpy()
+        eigenvalues = (
+            gcp_ose_model._get_posterior_eigenvalue_estimates().cpu().numpy()
+        )
         eigenvalues_list.append(eigenvalues)
         posterior_mean_coeffics = (
             gcp_ose_model._get_posterior_mean_coefficients().cpu().numpy()
@@ -91,8 +94,12 @@ class SynthPlot(Plot):
                 torch.zeros_like(data_set).cpu().numpy(),
                 marker="x",
             )
-            plt.plot(x_axis.cpu().numpy(), posterior_mean(x_axis).cpu().numpy())
-            plt.plot(x_axis.cpu().numpy(), self.ground_truth(x_axis).cpu().numpy())
+            plt.plot(
+                x_axis.cpu().numpy(), posterior_mean(x_axis).cpu().numpy()
+            )
+            plt.plot(
+                x_axis.cpu().numpy(), self.ground_truth(x_axis).cpu().numpy()
+            )
         plt.legend(
             (
                 "Posterior mean",
@@ -124,7 +131,9 @@ class Synth1Plot(SynthPlot):
 
     @staticmethod
     def ground_truth(x_axis):
-        return 2 * torch.exp(-x_axis / 15) + torch.exp(-(((x_axis - 25) / 10) ** 2))
+        return 2 * torch.exp(-x_axis / 15) + torch.exp(
+            -(((x_axis - 25) / 10) ** 2)
+        )
 
 
 class Synth2Figure(Figure):
@@ -236,7 +245,9 @@ class Spatial2dPlot(Plot):
             basis=chebyshev_basis,
             dimension=dim,
         )
-        prior_parameters = PriorParameters(mean=0.0, alpha=1.5, beta=2.0, nu=0.12)
+        prior_parameters = PriorParameters(
+            mean=0.0, alpha=1.5, beta=2.0, nu=0.12
+        )
         gcp_ose_model = BayesianOrthogonalSeriesCoxProcessObservationNoise(
             gcp_ose_hyperparameters, prior_parameters
         )
@@ -308,7 +319,9 @@ def run_synthetic_plots(save):
 
     # Redwoods California Plot
     plot = [RedWoodsCalifornia()]
-    redwoods_california_figure = Spatial2dFigure(plot, section, "redwoodscalifornia")
+    redwoods_california_figure = Spatial2dFigure(
+        plot, section, "redwoodscalifornia"
+    )
     redwoods_california_figure.run_figure(save=save)
 
     # White Oak Plot
@@ -362,8 +375,6 @@ class SynthPlotICML(Plot):
         posterior_mean_coeffics_list = []
         eigenvalues_list = []
         obs_boundaries = [50, 5, 100]
-        print(colored("WHAT THE HELL?!", "red"))
-        breakpoint()
         orders = [8, 16, 8]
         plot_types = [Synth1Plot, Synth2Plot, Synth3Plot]
         for i, data_set, boundaries, obs_boundary, order, plot_type in zip(
@@ -387,7 +398,9 @@ class SynthPlotICML(Plot):
                 basis=chebyshev_basis,
                 dimension=dim,
             )
-            prior_parameters = PriorParameters(mean=0.0, alpha=1.5, beta=2.0, nu=0.12)
+            prior_parameters = PriorParameters(
+                mean=0.0, alpha=1.5, beta=2.0, nu=0.12
+            )
             gcp_ose_model = BayesianOrthogonalSeriesCoxProcessObservationNoise(
                 gcp_ose_hyperparameters, prior_parameters
             )
@@ -395,7 +408,9 @@ class SynthPlotICML(Plot):
 
             # get the various stuff
             eigenvalues = (
-                gcp_ose_model._get_posterior_eigenvalue_estimates().cpu().numpy()
+                gcp_ose_model._get_posterior_eigenvalue_estimates()
+                .cpu()
+                .numpy()
             )
             eigenvalues_list.append(eigenvalues)
             posterior_mean_coeffics = (
@@ -406,8 +421,13 @@ class SynthPlotICML(Plot):
             posterior_means_list.append(posterior_mean)
             fineness = 100
             x_axis = torch.linspace(0, obs_boundary, fineness)
-            plt.plot(x_axis.cpu().numpy(), posterior_mean(x_axis).cpu().numpy())
-            plt.plot(x_axis.cpu().numpy(), plot_type.ground_truth(x_axis).cpu().numpy())
+            plt.plot(
+                x_axis.cpu().numpy(), posterior_mean(x_axis).cpu().numpy()
+            )
+            plt.plot(
+                x_axis.cpu().numpy(),
+                plot_type.ground_truth(x_axis).cpu().numpy(),
+            )
             plt.scatter(
                 data_set.cpu().numpy(),
                 torch.zeros_like(data_set).cpu().numpy(),
@@ -474,7 +494,9 @@ class ComparisonDiagramRedwood(RedWoodsFullPlot):
             basis=chebyshev_basis,
             dimension=dim,
         )
-        prior_parameters = PriorParameters(mean=0.0, alpha=1.5, beta=2.0, nu=0.12)
+        prior_parameters = PriorParameters(
+            mean=0.0, alpha=1.5, beta=2.0, nu=0.12
+        )
         gcp_ose_model = BayesianOrthogonalSeriesCoxProcessObservationNoise(
             gcp_ose_hyperparameters, prior_parameters
         )

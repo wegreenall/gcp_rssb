@@ -15,7 +15,6 @@ from gcp_rssb.methods.gcp_ose_bayesian import (
 import matplotlib.pyplot as plt
 
 from empirical_coverage import EmpiricalCoverageRunner, Area
-from termcolor import colored
 
 if __name__ == "__main__":
     generate_results = True
@@ -68,13 +67,9 @@ if __name__ == "__main__":
             )
 
             # add the data
-            print(colored("About to add the data:", "blue"), intensity)
+            print("About to add the data:", intensity)
             osegcp.add_data(data_set, domain)
-            print(
-                colored(
-                    "Just added the data - should have printed the times..."
-                )
-            )
+            print("Just added the data - should have printed the times...")
             # breakpoint()
             empirical_coverage_runner = EmpiricalCoverageRunner(
                 domain, dimension
@@ -84,9 +79,9 @@ if __name__ == "__main__":
             ] = empirical_coverage_runner.get_random_sets(set_count)
             for i in range(sample_count):
                 print("iteration:", i)
-                print(colored("about to get osegcp sample", "green"))
+                print("about to get osegcp sample")
                 osegcp_sample = osegcp.get_posterior_predictive_sample()
-                print(colored("osegcp_sample acquired", "red"))
+                print("osegcp_sample acquired")
                 vbpp_sample = torch.load(
                     data_loc + "vbpp_{}_{}.pt".format(intensity, i + 1)
                 )
@@ -108,7 +103,7 @@ if __name__ == "__main__":
                 # the random sets, count the points generated in our posterior
                 # predictive sample, and compare it to the number of points in the
                 # data
-                print(colored("about to check the data counts", "blue"))
+                print("about to check the data counts")
                 data_counts = torch.zeros(set_count)
                 method_counts_tensor = torch.zeros(
                     set_count, len(predictive_samples)

@@ -17,8 +17,6 @@ from ortho.basis_functions import Basis, standard_chebyshev_basis
 from typing import List, Tuple
 from gcp_rssb.methods.gcp_ose_classifier import GCPClassifier
 
-from termcolor import colored
-
 torch.manual_seed(1)
 
 
@@ -46,7 +44,9 @@ class ClassificationPlot2d(Plot):
         tensor_estimators = (
             torch.Tensor(estimators).cpu() / torch.Tensor(denominator).cpu()
         )
-        reshaped_tensor_estimators = tensor_estimators.reshape(fineness, fineness)
+        reshaped_tensor_estimators = tensor_estimators.reshape(
+            fineness, fineness
+        )
         plt.contourf(reshaped_tensor_estimators, levels=10)
 
         scaler = 50
@@ -88,12 +88,19 @@ class ClassificationPlotBananaDiagram(Plot):
         # get the axes for the plot
         test_axis = torch.linspace(-1.0, 1.0, fineness)
         test_axes_x, test_axes_y = torch.meshgrid(test_axis, test_axis)
-        test_points = torch.vstack((test_axes_x.ravel(), test_axes_y.ravel())).t()
+        test_points = torch.vstack(
+            (test_axes_x.ravel(), test_axes_y.ravel())
+        ).t()
 
         # denominator = estimators + estimators_2
-        plt.scatter(class_1_data_x.cpu(), class_1_data_y.cpu(), marker="x", color="red")
         plt.scatter(
-            class_2_data_x.cpu(), class_2_data_y.cpu(), marker="o", color="blue"
+            class_1_data_x.cpu(), class_1_data_y.cpu(), marker="x", color="red"
+        )
+        plt.scatter(
+            class_2_data_x.cpu(),
+            class_2_data_y.cpu(),
+            marker="o",
+            color="blue",
         )
 
         order = 10
@@ -111,7 +118,9 @@ class ClassificationPlotBananaDiagram(Plot):
         ] * 2
         basis_functions = [standard_chebyshev_basis] * 2
         ortho_basis = Basis(basis_functions, dimension, order, parameters)
-        hyperparameters = GCPOSEHyperparameters(basis=ortho_basis, dimension=dimension)
+        hyperparameters = GCPOSEHyperparameters(
+            basis=ortho_basis, dimension=dimension
+        )
 
         classifier = GCPClassifier(
             2, classifier_parameters, hyperparameters, data_informed=True

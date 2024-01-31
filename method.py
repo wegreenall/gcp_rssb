@@ -18,11 +18,6 @@ class BishopHyperparameters(MethodHyperparameters):
     parameters: dict
 
 
-class WilliamHyperparameters(MethodHyperparameters):
-    eigenvalues: Callable
-    basis_function: Callable
-
-
 class Method(ABC):
     """
     Interface representing method in point process estimation.

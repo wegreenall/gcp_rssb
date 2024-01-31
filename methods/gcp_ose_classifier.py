@@ -25,7 +25,6 @@ torch.set_default_dtype(torch.float64)
 # set to cuda
 # torch.set_default_tensor_type(torch.cuda.DoubleTensor)
 # torch.set_default_device("cuda")
-from termcolor import colored
 import gc
 
 

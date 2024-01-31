@@ -22,7 +22,6 @@ from ortho.basis_functions import (
 
 import matplotlib.pyplot as plt
 import tikzplotlib
-from termcolor import colored
 from gcp_rssb.methods.gcp_ose import (
     OrthogonalSeriesCoxProcess,
     GCPOSEHyperparameters,

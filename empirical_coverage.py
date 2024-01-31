@@ -14,7 +14,6 @@ from gcp_rssb.methods.gcp_ose_bayesian import (
 )
 import matplotlib.pyplot as plt
 import math
-from termcolor import colored
 
 """
 To do: re do the sample iterations!!!
@@ -325,10 +324,10 @@ if __name__ == "__main__":
     # plt.show()
 
     # print("Mean data:")
-    # print(colored(mean_data, "red"))
+    # print(mean_data)
     # print("    ")
     # print("Std data:")
-    # print(colored(std_data, "blue"))
+    # print(std_data)
     # for j in range(3):
     # print("synth {}".format(j + 1))
     # print("osegcp:")

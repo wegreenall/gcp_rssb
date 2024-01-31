@@ -15,7 +15,6 @@ from ortho.basis_functions import Basis, standard_chebyshev_basis
 from typing import List
 
 import matplotlib.pyplot as plt
-from termcolor import colored
 
 if __name__ == "__main__":
     """
