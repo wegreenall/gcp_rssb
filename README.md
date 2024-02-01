@@ -16,8 +16,7 @@ Notes on replication:
 - for the method by which we conduct thinning and generate Poisson process 
 samples, see `data.py`
 
-- for the empirical coverage (EC) metric, see `empirical_coverage.py` and 
-`empirical_coverage_2d.py`.
+- for the empirical coverage (EC) metric, see `empirical_coverage.py`
 
 - for base code, see `methods/gcp_ose.py`. Several classes in here are defunct.
 - for the Bayesian code, see `methods/gcp_ose_bayesian.py`
