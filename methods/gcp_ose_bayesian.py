@@ -89,15 +89,15 @@ class BayesianOrthogonalSeriesCoxProcess(OrthogonalSeriesCoxProcess):
 
         self.posterior_mean = self._get_posterior_mean()
         end_value = time.perf_counter()
-        print(
-            "Time taken to get estimates data: {}".format(
-                end_value - start_value
-            )
-        )
+        # print(
+        # "Time taken to get estimates data: {}".format(
+        # end_value - start_value
+        # )
+        # )
 
     def _get_posterior_mean_coefficients(self):
         """ """
-        print(self.ose_coeffics)
+        # print(self.ose_coeffics)
         return self.ose_coeffics / (self.prior_parameters.nu + 1)
 
     def _get_posterior_eigenvalue_estimates(self):
@@ -132,22 +132,37 @@ class BayesianOrthogonalSeriesCoxProcess(OrthogonalSeriesCoxProcess):
         """
         # step 1: generate a sample intensity function
         intensity_sample = self._get_intensity_sample()
-        # breakpoint()
 
         # step 2: generate a sample of the Poisson process
+        fineness = 50
         dimension = self.domain.shape[0]
+        x_axis = torch.linspace(
+            self.domain[0][0] - 0.1, self.domain[0][1] + 0.1, fineness
+        )
         if dimension == 1:
             x_axis = torch.linspace(
-                self.domain[0][0] - 0.1, self.domain[0][1] + 0.1, 1000
+                self.domain[0][0] - 0.1, self.domain[0][1] + 0.1, fineness
             )
             bound = torch.max(intensity_sample(x_axis))
             poisson_process = PoissonProcess(
                 intensity_sample, self.domain[0][1], bound
             )
         else:
+            # generate 2d axes
+            y_axis = torch.linspace(
+                self.domain[0][0] - 0.1, self.domain[0][1] + 0.1, fineness
+            )
+            X, Y = torch.meshgrid(x_axis, y_axis, indexing="ij")
+            Z = torch.stack((X, Y), dim=2)
+            Z = Z.reshape(-1, 2)
+            bound = (
+                torch.max(intensity_sample(Z)) * 1.1
+            )  # a reasonable guess that we're
+            # within 9.0909 percent of the max
             poisson_process = PoissonProcess2d(
                 intensity_sample,
                 domain=self.domain,
+                bound=bound,
             )
         poisson_process.simulate()
         return poisson_process.get_data()

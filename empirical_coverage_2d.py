@@ -20,7 +20,7 @@ if __name__ == "__main__":
     generate_results = True
     sample_count = 100
     dimension = 2
-    order = 20
+    order = 19
     set_count = 5000
     data_loc = "/home/william/phd/programming_projects/gcp_rssb/datasets/comparison_experiments/data_and_samples/samples_update/samples2D/"
     domains = [

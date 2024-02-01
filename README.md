@@ -16,7 +16,6 @@ Notes on replication:
 - for the method by which we conduct thinning and generate Poisson process 
 samples, see `data.py`
 
-- for the synthetic data experiments, run `methods/
 - for the empirical coverage (EC) metric, see `empirical_coverage.py` and 
 `empirical_coverage_2d.py`.
 

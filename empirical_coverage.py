@@ -260,7 +260,7 @@ if __name__ == "__main__":
                 predictive_residuals = (
                     data_counts_extended - method_counts_tensor
                 )
-
+                breakpoint()
                 # method_comparison_values = []
                 # for method_counts in method_counts_list:
                 # now we have a list of counts for each method
