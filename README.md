@@ -1,5 +1,4 @@
-Code for the paper "Orthogonal Series Gaussian Cox Processes" as submitted
-to ICML 2024.
+Code for the paper "Superposition Gaussian Cox Processes".
 
 It is based in PyTorch as its backend library. It also requires
 
