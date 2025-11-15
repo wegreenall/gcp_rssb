@@ -21,7 +21,6 @@ from ortho.basis_functions import (
 )
 
 import matplotlib.pyplot as plt
-import tikzplotlib
 from gcp_rssb.methods.gcp_ose import (
     OrthogonalSeriesCoxProcess,
     GCPOSEHyperparameters,
@@ -82,9 +81,7 @@ class BayesianOrthogonalSeriesCoxProcess(OrthogonalSeriesCoxProcess):
         self.ose_coeffics = self._get_ose_coeffics()
 
         # get the eigenvalues and mean estimates as posterior mean
-        self.posterior_mean_coefficients = (
-            self._get_posterior_mean_coefficients()
-        )
+        self.posterior_mean_coefficients = self._get_posterior_mean_coefficients()
         self.eigenvalues = self._get_posterior_eigenvalue_estimates()
 
         self.posterior_mean = self._get_posterior_mean()
@@ -128,7 +125,8 @@ class BayesianOrthogonalSeriesCoxProcess(OrthogonalSeriesCoxProcess):
 
     def get_posterior_predictive_sample(self):
         """
-        Returns a tensor of size (n_points, n_dim) where n_points is a Poisson distributed random variable.
+        Returns a tensor of size (n_points, n_dim) where n_points is a Poisson
+        distributed random variable.
         """
         # step 1: generate a sample intensity function
         intensity_sample = self._get_intensity_sample()
@@ -144,9 +142,7 @@ class BayesianOrthogonalSeriesCoxProcess(OrthogonalSeriesCoxProcess):
                 self.domain[0][0] - 0.1, self.domain[0][1] + 0.1, fineness
             )
             bound = torch.max(intensity_sample(x_axis))
-            poisson_process = PoissonProcess(
-                intensity_sample, self.domain[0][1], bound
-            )
+            poisson_process = PoissonProcess(intensity_sample, self.domain[0][1], bound)
         else:
             # generate 2d axes
             y_axis = torch.linspace(
@@ -199,7 +195,7 @@ class BayesianOrthogonalSeriesCoxProcessObservationNoise(
         self.hyperparameters = gcp_ose_hyperparameters
         self.prior_parameters = prior_parameters
 
-    def add_data(self, data_points: torch.Tensor):
+    def add_data(self, data_points: torch.Tensor, domain: torch.Tensor = None):
         """
         Adds the data to the model.
         """
@@ -212,15 +208,9 @@ class BayesianOrthogonalSeriesCoxProcessObservationNoise(
         self.ose_square_coeffics = self._get_ose_square_coeffics()
 
         # get the eigenvalues and mean estimates as posterior mean
-        self.posterior_mean_coefficients = (
-            self._get_posterior_mean_coefficients()
-        )
+        self.posterior_mean_coefficients = self._get_posterior_mean_coefficients()
         end_value = time.perf_counter()
-        print(
-            "Time taken to get estimates data: {}".format(
-                end_value - start_value
-            )
-        )
+        print("Time taken to get estimates data: {}".format(end_value - start_value))
         self.eigenvalues = self._get_posterior_eigenvalue_estimates()
 
         self.posterior_mean = self._get_posterior_mean()
@@ -260,13 +250,9 @@ class BayesianOrthogonalSeriesCoxProcessObservationNoise(
         intensity_sample = self._get_intensity_sample()
 
         # step 2: generate a sample of the Poisson process
-        x_axis = torch.linspace(
-            self.domain[0][0] - 0.1, self.domain[0][1] + 0.1, 1000
-        )
+        x_axis = torch.linspace(self.domain[0][0] - 0.1, self.domain[0][1] + 0.1, 1000)
         bound = torch.max(intensity_sample(x_axis))
-        poisson_process = PoissonProcess(
-            intensity_sample, self.domain[0][1], bound
-        )
+        poisson_process = PoissonProcess(intensity_sample, self.domain[0][1], bound)
         poisson_process.simulate()
         return poisson_process.get_data()
 
@@ -328,14 +314,10 @@ if __name__ == "__main__":
     max_time = 10.0
     alpha_1 = 8.0
     beta_1 = 1.0
-    intensity_1 = lambda x: 100 * torch.exp(
-        D.Gamma(alpha_1, beta_1).log_prob(x)
-    )
+    intensity_1 = lambda x: 100 * torch.exp(D.Gamma(alpha_1, beta_1).log_prob(x))
     alpha_2 = 3.0
     beta_2 = 1.0
-    intensity_2 = lambda x: 100 * torch.exp(
-        D.Gamma(alpha_2, beta_2).log_prob(x)
-    )
+    intensity_2 = lambda x: 100 * torch.exp(D.Gamma(alpha_2, beta_2).log_prob(x))
     x = torch.linspace(0.1, max_time, 1000)
     if plot_intensity:
         plt.plot(
@@ -374,6 +356,4 @@ if __name__ == "__main__":
     prior_parameters = PriorParameters(prior_mean, alpha, beta, nu)
 
     # cox hyper parameters
-    hyperparameters = GCPOSEHyperparameters(
-        basis=ortho_basis, dimension=dimension
-    )
+    hyperparameters = GCPOSEHyperparameters(basis=ortho_basis, dimension=dimension)
